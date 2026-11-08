@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">    
+    <title>AI家計簿</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- PWA Manifest & Theme Color -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#912301">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/icon-192.png') }}">
+    <meta name="color-scheme" content="dark">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- Tailwind CSS & Chart.js -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>      
+    
+    <style>
+        html {
+            scroll-behavior: smooth;
+        }
+        /* 金額や日付、カテゴリが不自然に改行されるのを防ぐ */
+        .nowrap {
+            white-space: nowrap;
+        }
+        .category-badge {
+            display: inline-block;
+            padding: 0.25em 0.6em;
+            font-size: 0.85em;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            white-space: nowrap;
+        }        
+        /* Hide number input spinners for Chrome, Safari, Edge, Opera */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        /* Hide number input spinners for Firefox */
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 pb-24">   
+
+    <!-- 🌟 ヘッダー開始（スマホ対応 & 固定表示） -->
+    <header class="bg-white shadow-sm border-b border-gray-100 sticky top-0 z-50">
+        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            
+            <!-- ロゴ・タイトル -->
+            <div class="flex items-center space-x-2">
+                <!--<span class="text-2xl">💰</span>-->
+                <h1 class="text-lg font-bold tracking-tight text-gray-800">我が家の家計簿</h1>
+            </div>
+            
+            <!-- 右側：ユーザー状態 & ログアウトボタン -->
+            <div class="flex items-center space-x-3">
+                <span class="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full font-medium">
+                    🔒 保護中
+                </span>                
+            </div>
+            
+        </div>
+    </header>
+
+    <div id="home-section" class="max-w-md mx-auto p-4">
+        <header class="text-center my-6">
+            <h1 class="text-2xl font-bold text-orange-500"> AI家計簿 PWA</h1>
+            <p class="text-xs text-gray-400">Gemini 3.5 Flash 搭載スマート支出管理</p>
+        </header>
+
+        <!-- カメラ撮影 & 画像選択エリア（デュアルボタン） -->
+        <!-- ========================================== -->
+        <!-- AIレシート自動マルチカテゴリ仕分けエリア -->
+        <!-- ========================================== -->
+        <div id="scan-section" class="scroll-mt-24 bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700 text-center mb-6">
+            <h2 class="text-lg font-bold mb-4 text-gray-200">レシートAIマルチ仕分けスキャン</h2>
+            
+            <!-- スキャン用トリガーボタン（カメラ＆ファイル選択） -->
+            <div class="space-y-3">
+                <label for="cameraInput" class="bg-orange-900 hover:bg-orange-950 text-white font-bold py-3 px-6 rounded-xl shadow-md block cursor-pointer text-center transition">
+                    📸 外側カメラで今すぐ撮影
+                </label>
+                <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="uploadAndAnalyzeReceipt(this)">
+
+                <label for="fileInput" class="bg-yellow-800 hover:bg-yellow-950 text-gray-200 font-bold py-3 px-6 rounded-xl shadow-md block cursor-pointer text-center transition">
+                    📁 保存済み画像から選択
+                </label>
+                <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="uploadAndAnalyzeReceipt(this)">
+            </div>
+
+            <!-- ローディング表示 -->
+            <div id="loading-spinner" class="hidden text-center py-6 space-y-2">
+                <div class="inline-block w-8 h-8 border-4 border-t-[#912301] border-gray-700 rounded-full animate-spin"></div>
+                <p class="text-xs text-gray-400">Geminiがマルチカテゴリ解析中...</p>
+            </div>
+        </div>
+
+        <!-- AI認識結果・マルチカテゴリ編集フォーム -->
+        <div id="editCard" class="hidden bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700 mb-6">
+            <h2 class="text-sm font-semibold mb-4 text-gray-200">📝 抽出結果の確認・マルチカテゴリ仕分け編集</h2>
+            
+            <form id="receipt-edit-form" class="space-y-4" onsubmit="saveExpense(event)">
+                <!-- 店舗名 & 日付 -->
+                <div class="grid grid-cols-2 gap-2 bg-gray-900/60 p-3 rounded-xl border border-gray-700">
+                    <div>
+                        <label class="block text-[10px] text-gray-400 font-medium mb-1">店舗名 / 購入先</label>
+                        <input type="text" id="store_name" name="store_name" required
+                            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-400 font-medium mb-1">日付</label>
+                        <input type="date" id="receipt_date" name="date" required
+                            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
+                    </div>
+                </div>
+
+                <!-- 品目明細・マルチカテゴリテーブル -->
+                <div>
+                    <div class="flex justify-between items-center mb-2 px-1">
+                        <span class="text-xs font-semibold text-gray-300">品目・カテゴリ内訳</span>
+                        <span class="text-[10px] text-gray-400">※AI自動仕分け（タップで変更可）</span>
+                    </div>
+                    
+                    <!-- 動的品目コンテナ -->
+                    <div id="items-container" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
+
+                    <!-- 行追加ボタン -->
+                    <button type="button" onclick="addNewItemRow()" 
+                            class="mt-2 w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-xl border border-dashed border-gray-500 transition-colors flex items-center justify-center gap-1">
+                        <span>＋</span> 品目行を手動追加
+                    </button>
+                </div>
+
+                <!-- 消費税 & 合計金額エリア -->
+                <div class="grid grid-cols-2 gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
+                    <!-- 消費税入力 -->
+                    <div>
+                        <label class="block text-[10px] text-gray-400 font-medium mb-1">消費税 (円)</label>
+                        <input type="number" id="tax" name="tax" value="0"
+                            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
+                    </div>
+                    <!-- 仕分け合計金額 -->
+                    <div class="text-right">
+                        <span class="block text-[10px] text-gray-400 font-medium mb-1">仕分け合計金額</span>
+                        <span id="computed-total" class="text-base font-bold text-white">¥0</span>
+                    </div>
+                </div>
+
+                <input type="hidden" id="hidden_total_amount" name="total_amount" value="0">
+
+                <!-- 保存・破棄ボタン -->
+                <div class="grid grid-cols-2 gap-3 pt-2">
+                    <button type="submit" 
+                            class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-900 active:scale-95 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all text-xs">
+                        💾 登録
+                    </button>
+                    <button type="button" onclick="discardExpense()" 
+                            class="bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold py-2 rounded-xl text-xs">
+                        ❌ 破棄
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- 🌟 1. 統合されたトップサマリーカード -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 space-y-4">
+            
+            <!-- 月選択 ＆ 検索バー -->
+            <form method="GET" action="{{ url_for('index') }}" class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+                    <select name="month" id="monthFilter" onchange="filterDataByMonth()" 
+                            class="bg-gray-50 border border-gray-200 text-gray-800 text-xs sm:text-sm rounded-xl px-2.5 sm:px-3.5 py-2.5 focus:ring-blue-500 focus:border-blue-500 font-medium shadow-sm">
+                        <option value="all">すべての月</option>
+                        <!-- JavaScript will automatically insert month options here -->
+                    </select>
+
+                    <button type="button" onclick="resetToCurrentMonth()" 
+                            class="px-3 sm:px-4 py-2.5 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 text-xs sm:text-sm font-medium rounded-xl transition-all shadow-sm flex-shrink-0">
+                        今月
+                    </button>
+                </div>
+
+                <div class="relative flex-1 flex items-center min-w-0">
+                    <input type="text" id="searchInput" name="q" value="{{ search_query or '' }}" oninput="filterDataByMonth(); toggleClearButton();" placeholder="🔍 店舗名・カテゴリで検索..." 
+                        class="w-full bg-gray-50 border border-gray-200 text-gray-900 text-xs sm:text-sm rounded-xl px-3 py-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    
+                    <button type="button" id="clearSearchBtn" onclick="clearSearch()" 
+                            class="absolute right-2 text-gray-400 hover:text-gray-700 p-0.5 {% if not search_query %}hidden{% endif %}">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+
+            <!-- 🌟 Top Header Summary Card -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider">選択月の総支出</h2>
+                    <span id="topFilteredCount" class="text-xs font-medium text-gray-500 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">全 0 件</span>
+                </div>
+
+                <!-- Side-by-side equal prominence layout -->
+                <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-50">
+                    <div>
+                        <div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">商品合計 (税抜)</div>
+                        <div id="topTotalAmount" class="text-lg font-extrabold text-gray-900 font-mono mt-0.5">¥0</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">消費税</div>
+                        <div id="topTotalTax" class="text-lg font-extrabold text-indigo-600 font-mono mt-0.5">¥0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mt-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xs font-bold text-gray-600 uppercase tracking-wider">カテゴリ別内訳</h2>
+                    <span class="text-[11px] font-medium text-gray-400">Donut Center Overview</span>
+                </div>
+                
+                <!-- Donut Chart Container with Centered Overlay -->
+                <div class="relative w-full h-64 flex justify-center items-center">
+                    <canvas id="categoryDonutChart"></canvas>
+                    
+                    <!-- Floating Center Overlay inside the Donut Hole with strict tax-excluded terminology -->
+                    <div id="donutCenterOverlay" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">商品合計 (税抜)</span>
+                        <span id="centerTotalAmount" class="text-sm font-extrabold text-gray-900 font-mono">¥0</span>
+                        <span id="centerTotalTax" class="text-[10px] font-bold text-indigo-600 font-mono mt-0.5">消費税: ¥0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🌟 2. 支出明細一覧（合計欄つきテーブル） -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden p-4">
+            <h2 class="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3">支出明細一覧（税抜き合計額と税金）</h2>
+            
+            {% if expenses %}
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <!-- 列幅の定義 -->
+                        <colgroup>
+                            <col style="width: 45%;"> <!-- 1st Column: 日付・店舗名 -->
+                            <col style="width: 35%;"> <!-- 2nd Column: 金額（税抜）・消費税 -->
+                            <col style="width: 20%;"> <!-- 3rd Column: AI詳細ボタン ＆ 削除ボタン -->
+                        </colgroup>
+
+                        <!-- テーブル本体（JSが動的に行を書き換える場所） -->
+                        <tbody id="expenseList" class="divide-y divide-gray-100 bg-white">
+                            {% for item in expenses %}
+                            <!-- 🌟 Add the unique row ID and transition classes right here on the <tr> -->
+                            <tr id="row-{{ item.get('id', '') }}" class="hover:bg-gray-50/80 transition-all duration-300">
+                                <!-- 日付と店舗名 -->
+                                <td class="py-3 px-3">
+                                    <div class="text-[11px] text-gray-500 font-medium">{{ item.get('日付', '') }}</div>
+                                    <div class="text-xs font-bold text-gray-900 mt-0.5 max-w-[160px] sm:max-w-xs truncate" title="{{ item.get('店舗名', '不明') }}">
+                                        {{ item.get('店舗名', '不明') }}
+                                    </div>
+                                </td>                                        
+                                
+                                <!-- 金額と税 (Equal visual weight) -->
+                                <td class="py-3 px-3 text-right whitespace-nowrap font-mono">
+                                    <div class="text-xs font-extrabold text-gray-900">¥{{ "{:,}".format(item.get('金額 (¥)', 0) | int) }}</div>
+                                    <div class="text-xs font-bold text-indigo-600 mt-0.5">税: ¥{{ "{:,}".format(item.get('消費税 (¥)', 0) | int) }}</div>
+                                </td>
+
+                                <!--                                
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center space-x-2">
+                                        
+                                        <button onclick="toggleReceiptDetails('${receipt.id}')" class="px-2 py-0.5 text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors">
+                                            AI詳細
+                                        </button>
+                                    </div>
+                                    
+                                    <button onclick="deleteReceipt('${receipt.id}')" class="text-gray-400 hover:text-red-500">...</button>
+                                </div>
+                                -->
+
+                                <!-- Expandable Sub-Table Container (Hidden by default) -->
+                                <div id="details-${receipt.id}" class="hidden mt-3 pt-3 border-t border-gray-100 bg-gray-50/50 rounded-xl p-3 text-xs">
+                                    <div class="font-bold text-gray-700 mb-2">AI解析・商品内訳</div>
+                                    <div class="space-y-1">
+                                        <!-- Dynamically injected item rows go here -->
+                                    </div>
+                                </div>
+                                
+                                <!-- 削除ボタン -->
+                                <td class="py-3 px-3 text-center whitespace-nowrap">
+                                    <button type="button" onclick="deleteExpense('{{ item.get('id', '') }}')" 
+                                        class="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors border border-red-200">
+                                        削除
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+
+                        <!-- フッター（合計行） -->
+                        <tfoot>
+                            <tr class="bg-gray-50/50 font-semibold border-t border-gray-200">
+                                <td class="py-3 px-3 text-xs text-gray-700 font-bold">
+                                    合計 (<span id="filteredCount">0</span>件)
+                                </td>
+                                <td class="py-3 px-3 text-right font-mono">
+                                    <div id="totalAmountCell" class="text-xs sm:text-sm font-extrabold text-gray-900">¥0</div>
+                                    <div id="totalTaxCell" class="text-xs sm:text-sm font-bold text-indigo-600 mt-0.5">税: ¥0</div>
+                                </td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-gray-400 text-sm text-center py-6">該当する支出データがありません。</p>
+            {% endif %}
+
+        
+            <!-- ★ CSVダウンロードボタン -->
+            {% if expenses %}
+            <div class="mt-6 pt-4 border-t border-gray-700 flex gap-3">
+                <a id="exportCsvBtn" href="/api/export-csv?month=ALL" class="bg-lime-800 hover:bg-lime-950 text-white font-bold py-2 px-4 rounded-xl shadow-sm transition inline-flex items-center">
+                    CSVエクスポート
+                </a>
+                <button onclick="deleteAllExpenses()" class="flex-1 bg-lime-700 hover:bg-lime-950 text-white font-bold py-2 px-4 rounded-xl shadow-sm transition inline-flex items-center justify-center">
+                    全データ削除
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Gemini AI Analysis Loading Overlay -->
+    <div id="aiLoadingOverlay" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex flex-col items-center justify-center hidden transition-opacity duration-300">
+        <div class="bg-white px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center space-y-4 border border-gray-100 max-w-xs mx-auto text-center transform scale-95 animate-in fade-in zoom-in duration-200">
+            <!-- Pulsing Gemini Ring -->
+            <div class="relative w-14 h-14 flex items-center justify-center">
+                <div class="absolute inset-0 border-4 border-indigo-100 rounded-full animate-ping opacity-75"></div>
+                <div class="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
+                <span class="text-indigo-600 font-bold text-lg">✨</span>
+            </div>
+            <div>
+                <h3 class="text-sm font-bold text-gray-900 tracking-tight">Gemini がレシートを解析中</h3>
+                <p class="text-[11px] text-gray-500 mt-0.5">店舗名・品目・内税を自動で読み取っています...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🌟 ボトムナビゲーションバー（画面下部固定・片手操作用） -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-md border-t border-gray-800 py-2 px-4 flex justify-around items-center z-50 shadow-lg">
+        
+        <!-- ホーム -->
+        <a href="#home-section" onclick="window.scrollTo({top: 0, behavior: 'smooth'}); return false;" class="nav-link flex flex-col items-center text-red-500 hover:text-white active:scale-95 transition-colors py-1 px-3 rounded-xl" data-target="home-section">
+            <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+            </svg>
+            <span class="text-[10px] font-medium">ホーム</span>
+        </a>
+        
+        <!-- スキャン -->
+        <a href="#scan-section" class="flex flex-col items-center text-gray-400 hover:text-white active:scale-95 transition-colors py-1 px-3 rounded-xl">
+            <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+            <span class="text-[10px] font-medium">スキャン</span>
+        </a>
+        
+        <!-- 履歴 -->
+        <a href="#history-section" class="nav-link flex flex-col items-center text-gray-400 hover:text-white active:scale-95 transition-colors py-1 px-3 rounded-xl" data-target="history-section">
+            <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+            </svg>
+            <span class="text-[10px] font-medium">履歴</span>
+        </a>
+        
+        <!-- ログアウト -->
+        <a href="/logout" class="flex flex-col items-center text-gray-400 hover:text-red-400 active:scale-95 transition-colors py-1 px-3 rounded-xl">
+            <svg class="w-6 h-6 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+            </svg>
+            <span class="text-[10px] font-medium">終了(Out)</span>
+        </a>
+
+    </nav>
+
+    <script>
+    // ==========================================
+    // 0. グローバル変数＆初期化処理（明細・サマリー管理）
+    // ==========================================
+    let currentParsedData = null;
+    let chartInstance = null;
+
+    // サーバー上の本来のインデックスを保持
+    // 余計な .map で上書きせず、Pythonから渡された構造をそのまま受け取る
+    let rawExpenses = {{ expenses | tojson | safe }};
+    let allExpenses = (Array.isArray(rawExpenses) ? rawExpenses : []).map(normalizeExpense);
+    // Sort chronologically
+    allExpenses.sort((a, b) => (a['日付'] || '').localeCompare(b['日付'] || '')); 
+
+    // Universal normalizer to handle key variations (Japanese vs English/API keys)
+    function normalizeExpense(item) {
+        if (!item) return {};
+        
+        // 1. Extract values with fallbacks across all possible key variations
+        const id = item['id'] || item.id || 'rec_' + Math.random().toString(36).substr(2, 9);
+        const date = item['日付'] || item.date || item.transaction_date || '';
+        const store = item['店舗名'] || item.store || item.store_name || '不明';
+        const category = item['カテゴリ'] || item.category || 'その他';
+        
+        const rawAmt = item['金額 (¥)'] !== undefined ? item['金額 (¥)'] : 
+                    (item['金額'] !== undefined ? item['金額'] : 
+                    (item['total_amount'] !== undefined ? item['total_amount'] : 
+                    (item['amount'] !== undefined ? item['amount'] : 0)));
+        const amount = Number(String(rawAmt).replace(/[^0-9.-]+/g, "")) || 0;
+
+        const rawTax = item['内消費税 (¥)'] !== undefined ? item['内消費税 (¥)'] : 
+                    (item['内税'] !== undefined ? item['内税'] : 
+                    (item['tax'] !== undefined ? item['tax'] : 0));
+        const tax = Number(String(rawTax).replace(/[^0-9.-]+/g, "")) || 0;
+
+        // 2. Return an object populated with BOTH naming conventions so NO function ever fails
+        return {
+            'id': id,
+            '日付': date,
+            'date': date,
+            '店舗名': store,
+            'store': store,
+            'カテゴリ': category,
+            'category': category,
+            '金額 (¥)': amount,
+            '金額': amount,
+            'total_amount': amount,
+            'amount': amount,
+            '内消費税 (¥)': tax,
+            '内税': tax,
+            'tax': tax
+        };
+    }
+
+    // 🌟 ② ユーザーが手動で月を変更したときにLocalStorageに保存する
+    const monthFilter = document.getElementById('monthFilter');
+    if (monthFilter) {
+        monthFilter.addEventListener('change', () => {
+            localStorage.setItem('hisa_last_month', monthFilter.value);
+            filterDataByMonth();
+        });
+    }
+
+    // ==========================================
+    // 1. 月別・キーワードによる明細テーブル＆サマリー更新
+    // ==========================================
+    function getAmount(item) {
+        // どんなキー名であっても確実に数値として拾い出す
+        return Number(item['金額 (¥)'] || item['金額'] || item['total_amount'] || item['amount'] || 0);
+    }
+
+    function getTax(item) {
+        return Number(item['内税 (¥)'] || item['内消費税'] || item['tax'] || 0);
+    }
+
+    function filterDataByMonth() {
+        const monthSelect = document.getElementById('monthFilter');
+        const searchInput = document.getElementById('searchInput');
+        
+        const selectedMonth = monthSelect ? monthSelect.value : 'all';
+        const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+        let filtered = [];
+
+        // 🌟 Unified Filtering: Respects both Month Dropdown AND Search Query simultaneously
+        filtered = allExpenses.filter(item => {
+            // 1. Month validation check
+            const dateStr = item['日付'] || item['date'] || '';
+            const monthMatch = (!selectedMonth || selectedMonth === 'all' || dateStr.startsWith(selectedMonth));
+            
+            if (!monthMatch) {
+                return false; // Exclude if it doesn't match the selected month
+            }
+
+            // 2. Search query check (if search input has text)
+            if (searchQuery) {
+                const store = String(item['店舗名'] || item['store'] || item['store_name'] || item['店舗'] || '').toLowerCase();
+                const storeMatch = store.includes(searchQuery);
+                
+                const itemsList = item['items'] || [];
+                const itemMatch = itemsList.some(subItem => 
+                    String(subItem.name || subItem['商品名'] || '').toLowerCase().includes(searchQuery) || 
+                    String(subItem.category || subItem['カテゴリ'] || '').toLowerCase().includes(searchQuery)
+                );
+
+                return storeMatch || itemMatch; // Must match both month AND search query
+            }
+
+            return true; // Included if month matches and search bar is empty
+        });        
+        
+        // 🌟 2. Normal Month Filtering if search bar is empty
+        filtered = allExpenses.filter(item => {
+            const dateStr = item['日付'] || item['date'] || '';
+            if (!selectedMonth || selectedMonth === 'all') {
+                return true;
+            }
+            return dateStr.startsWith(selectedMonth);
+        });        
+
+        const tbody = document.getElementById('expenseList');
+        let totalAmount = 0;
+        let totalTax = 0;
+
+        if (tbody) {
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" class="text-center text-gray-400 text-xs py-6">該当する支出データがありません。</td></tr>`;
+            } else {
+                let html = '';
+                filtered.forEach(item => {
+                    const id = item['id'] || '';
+                    const date = item['日付'] || item['date'] || '';
+                    const store = item['店舗名'] || item['store'] || item['store_name'] || item['店舗'] || '不明';
+
+                    const itemsList = item['items'] || [];
+                    const receiptTotal = Number(item['金額 (¥)'] !== undefined ? item['金額 (¥)'] : (item['金額'] !== undefined ? item['金額'] : (item['total_amount'] !== undefined ? item['total_amount'] : (item['amount'] !== undefined ? item['amount'] : 0)))) || 1;
+                    const receiptTax = Number(item['内消費税 (¥)'] !== undefined ? item['内消費税 (¥)'] : (item['内税'] !== undefined ? item['内税'] : (item['tax'] !== undefined ? item['tax'] : 0)));
+
+                    let itemAmount = 0;
+                    let itemTax = 0;
+
+                    const storeNameStr = store.toLowerCase();
+                    const matchedByStoreOnly = searchQuery && storeNameStr.includes(searchQuery) && 
+                        !itemsList.some(sub => {
+                            const cat = String(sub.category || sub['カテゴリ'] || '').toLowerCase();
+                            const name = String(sub.name || sub['商品名'] || '').toLowerCase();
+                            return cat.includes(searchQuery) || name.includes(searchQuery);
+                        });
+
+                    if (searchQuery && itemsList.length > 0 && !matchedByStoreOnly) {
+                        // Sum only matching sub-items when search query targets specific items/categories
+                        itemsList.forEach(sub => {
+                            const subCat = String(sub.category || sub['カテゴリ'] || '').toLowerCase();
+                            const subName = String(sub.name || sub['商品名'] || '').toLowerCase();
+                            const subAmt = Number(String(sub.amount || sub['金額'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+
+                            if (subCat.includes(searchQuery) || subName.includes(searchQuery)) {
+                                itemAmount += subAmt;
+                                if (receiptTotal > 0 && receiptTax > 0) {
+                                    itemTax += (subAmt / receiptTotal) * receiptTax;
+                                }
+                            }
+                        });
+                    } else {
+                        // Default to full receipt total if no search query or matched purely by store name
+                        const rawAmt = item['金額 (¥)'] !== undefined ? item['金額 (¥)'] : 
+                                    (item['金額'] !== undefined ? item['金額'] : 
+                                    (item['total_amount'] !== undefined ? item['total_amount'] : 
+                                    (item['amount'] !== undefined ? item['amount'] : 0)));
+                        itemAmount = Number(String(rawAmt).replace(/[^0-9.-]+/g, "")) || 0;
+
+                        const rawTax = item['内消費税 (¥)'] !== undefined ? item['内消費税 (¥)'] : 
+                                    (item['内税'] !== undefined ? item['内税'] : 
+                                    (item['tax'] !== undefined ? item['tax'] : 0));
+                        itemTax = Number(String(rawTax).replace(/[^0-9.-]+/g, "")) || 0;
+                    }
+
+                    totalAmount += itemAmount;
+                    totalTax += itemTax;
+
+                    // Build itemized sub-items list for the expandable AI details row
+                    let subItemsHTML = '';
+                    if (itemsList.length > 0) {
+                        subItemsHTML = itemsList.map(sub => `
+                            <div class="flex justify-between items-center text-gray-700 py-1 px-2.5 bg-white rounded-lg border border-gray-100 text-xs mb-1">
+                                <div>
+                                    <span class="font-medium text-gray-900">${sub.name || sub['商品名'] || '商品'}</span>
+                                    <span class="text-[10px] text-gray-400 ml-2">(${sub.category || sub['カテゴリ'] || '一般'})</span>
+                                </div>
+                                <span class="font-mono font-bold text-gray-900">¥${Number(String(sub.amount || sub['金額'] || 0).replace(/[^0-9.-]+/g, "")).toLocaleString()}</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        subItemsHTML = `<div class="text-gray-400 text-xs italic py-1">商品内訳データがありません</div>`;
+                    }
+
+                    html += `
+                    <tr class="hover:bg-gray-50/80 transition-colors border-b border-gray-100">
+                        <td class="py-3 px-3">
+                            <div class="text-[11px] text-gray-500 font-medium">${date}</div>
+                            <div class="text-xs font-bold text-gray-900 mt-0.5 max-w-[180px] sm:max-w-xs truncate" title="${store}">
+                                ${store}
+                            </div>
+                        </td>
+                        <td class="py-3 px-3 text-right whitespace-nowrap font-mono">
+                            <div class="text-xs font-extrabold text-gray-900">¥${itemAmount.toLocaleString()}</div>
+                            <div class="text-xs font-bold text-indigo-600 mt-0.5">消費税: ¥${Math.round(itemTax).toLocaleString()}</div>
+                        </td>
+                        <td class="py-3 px-3 text-center whitespace-nowrap flex items-center justify-center space-x-2">
+                            <button onclick="toggleReceiptDetails('${id}')" 
+                                class="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors border border-indigo-200">
+                                AI詳細
+                            </button>
+                            <button onclick="deleteExpense('${id}')" 
+                                class="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors border border-red-200">
+                                削除
+                            </button>
+                        </td>
+                    </tr>
+                    <!-- Expandable AI Details Sub-Table Row -->
+                    <tr id="details-${id}" class="hidden bg-gray-50/60 border-b border-gray-100">
+                        <td colspan="3" class="px-4 py-3">
+                            <div class="text-xs font-bold text-gray-700 mb-2 flex items-center justify-between">
+                                <span>AI解析・商品内訳</span>
+                                <span class="text-[10px] text-gray-400 font-normal">Receipt Item Breakdown</span>
+                            </div>
+                            <div class="space-y-1">
+                                ${subItemsHTML}
+                            </div>
+                        </td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+            }
+        }
+
+        // Update Table Footer Cells & Count
+        const countEl = document.getElementById('filteredCount');
+        const amountEl = document.getElementById('totalAmountCell');
+        const taxEl = document.getElementById('totalTaxCell');
+
+        if (countEl) countEl.textContent = filtered.length;
+        if (amountEl) amountEl.textContent = `¥${Math.round(totalAmount).toLocaleString()}`;
+        if (taxEl) taxEl.textContent = `消費税: ¥${Math.round(totalTax).toLocaleString()}`;
+
+        // Update Top Header Summary Cards
+        const topTotalAmountEl = document.getElementById('topTotalAmount');
+        const topTotalTaxEl = document.getElementById('topTotalTax');
+        const topFilteredCountEl = document.getElementById('topFilteredCount');
+
+        if (topTotalAmountEl) topTotalAmountEl.textContent = `¥${Math.round(totalAmount).toLocaleString()}`;
+        if (topTotalTaxEl) topTotalTaxEl.textContent = `¥${Math.round(totalTax).toLocaleString()}`; 
+        if (topFilteredCountEl) topFilteredCountEl.textContent = `全 ${filtered.length} 件`;
+
+        // Update Category Summary Cards
+        if (typeof updateCategoryCards === 'function') {
+            updateCategoryCards(filtered);
+        }
+    }
+
+    function toggleReceiptDetails(receiptId) {
+        const detailRow = document.getElementById(`details-${receiptId}`);
+        if (!detailRow) return;
+
+        if (detailRow.classList.contains('hidden')) {
+            detailRow.classList.remove('hidden');
+        } else {
+            detailRow.classList.add('hidden');
+        }
+    }
+
+    // Automatically populate the month dropdown from loaded expenses
+    function initMonthDropdown() {
+        const monthSelect = document.getElementById('monthFilter');
+        if (!monthSelect || typeof allExpenses === 'undefined') return;
+
+        let currentSelected = monthSelect.value || localStorage.getItem('hisa_last_month') || 'all';
+
+        // Extract unique months using the English 'date' key
+        const months = new Set();
+        allExpenses.forEach(item => {
+            const dateStr = item.date || item['日付'] || '';
+            if (dateStr.length >= 7) {
+                const monthKey = dateStr.substring(0, 7).replace('/', '-');
+                months.add(monthKey);
+            }
+        });
+
+        // Check if the currently selected month actually exists in the remaining data
+        if (currentSelected !== 'all' && !months.has(currentSelected)) {
+            // If the last item of this month was deleted, gracefully fall back to 'all'
+            currentSelected = 'all';
+            localStorage.setItem('hisa_last_month', 'all');
+        }
+
+        // Sort months descending (newest first)
+        const sortedMonths = Array.from(months).sort().reverse();
+
+        // Clear existing dynamic options (keep the first "all" option)
+        while (monthSelect.options.length > 1) {
+            monthSelect.remove(1);
+        }
+
+        // Append options
+        sortedMonths.forEach(m => {
+            const option = document.createElement('option');
+            option.value = m;
+            option.textContent = m;
+            monthSelect.appendChild(option);
+        });
+
+        // Set value safely
+        monthSelect.value = currentSelected;
+    }
+
+    // Call this inside your window.onload or DOMContentLoaded event
+    document.addEventListener('DOMContentLoaded', () => {
+        initMonthDropdown();
+        filterDataByMonth(); // Initial render
+    });
+
+    function toggleClearButton() {
+        const input = document.getElementById('searchInput');
+        const btn = document.getElementById('clearSearchBtn');
+        if (!btn) return;
+        if (input && input.value.length > 0) {
+            btn.classList.remove('hidden');
+        } else {
+            btn.classList.add('hidden');
+        }
+    }
+
+    function clearSearch() {
+        const input = document.getElementById('searchInput');
+        if (input) input.value = '';
+        const btn = document.getElementById('clearSearchBtn');
+        if (btn) btn.classList.add('hidden');
+        filterDataByMonth();
+    }
+
+    let categoryChartInstance = null;
+
+    function updateCategoryCards(filteredItems) {
+        const canvasElement = document.getElementById('categoryDonutChart');
+        const centerAmountEl = document.getElementById('centerTotalAmount');
+        const centerTaxEl = document.getElementById('centerTotalTax');
+        if (!canvasElement) return;
+
+        const searchInput = document.getElementById('searchInput');
+        const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+        const categoryMap = {};
+        let totalFilteredSubItemAmount = 0;
+        let totalFilteredTaxAmount = 0;
+
+        filteredItems.forEach(receipt => {
+            const subItems = receipt['items'] || [];
+            const receiptTotal = Number(receipt['total_amount'] || receipt['金額'] || 0) || 1;
+            const receiptTax = Number(receipt['tax'] || receipt['内税'] || receipt['内消費税 (¥)'] || 0);
+
+            const storeName = String(receipt['店舗名'] || receipt['store'] || receipt['store_name'] || '').toLowerCase();
+            const matchedByStoreOnly = searchQuery && storeName.includes(searchQuery) && 
+                !subItems.some(sub => {
+                    const cat = String(sub['category'] || sub['カテゴリ'] || sub['分類'] || '').toLowerCase();
+                    const name = String(sub['name'] || sub['商品名'] || '').toLowerCase();
+                    return cat.includes(searchQuery) || name.includes(searchQuery);
+                });
+
+            if (Array.isArray(subItems) && subItems.length > 0) {
+                subItems.forEach(sub => {
+                    const category = sub['category'] || sub['カテゴリ'] || sub['分類'] || '未分類';
+                    const subName = String(sub['name'] || sub['商品名'] || '').toLowerCase();
+                    const subAmt = Number(String(sub['amount'] || sub['金額'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+
+                    if (searchQuery && !matchedByStoreOnly) {
+                        const matchesCategory = category.toLowerCase().includes(searchQuery);
+                        const matchesSubName = subName.includes(searchQuery);
+                        if (!matchesCategory && !matchesSubName) return;
+                    }
+
+                    totalFilteredSubItemAmount += subAmt;
+                    const subTax = (receiptTotal > 0) ? (subAmt / receiptTotal) * receiptTax : 0;
+                    totalFilteredTaxAmount += subTax;
+
+                    if (!categoryMap[category]) {
+                        categoryMap[category] = { amount: 0, tax: 0 };
+                    }
+                    categoryMap[category].amount += subAmt;
+                    categoryMap[category].tax += subTax;
+                });
+            } else {
+                const category = receipt['category'] || receipt['カテゴリ'] || '未分類';
+                const flatAmt = Number(String(receipt['total_amount'] || receipt['金額'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                const flatTax = Number(String(receipt['tax'] || receipt['内税'] || receipt['内消費税 (¥)'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                
+                totalFilteredSubItemAmount += flatAmt;
+                totalFilteredTaxAmount += flatTax;
+
+                if (!categoryMap[category]) {
+                    categoryMap[category] = { amount: 0, tax: 0 };
+                }
+                categoryMap[category].amount += flatAmt;
+                categoryMap[category].tax += flatTax;
+            }
+        });
+
+        // Update Center Overlay text immediately on load
+        if (centerAmountEl) centerAmountEl.textContent = `¥${Math.round(totalFilteredSubItemAmount).toLocaleString()}`;
+        if (centerTaxEl) centerTaxEl.textContent = `税: ¥${Math.round(totalFilteredTaxAmount).toLocaleString()}`;
+
+        // Sort categories descending by amount
+        const sortedCategories = Object.keys(categoryMap).sort((a, b) => categoryMap[b].amount - categoryMap[a].amount);
+        const labels = sortedCategories;
+        const dataValues = sortedCategories.map(cat => categoryMap[cat].amount);
+        const taxValues = sortedCategories.map(cat => categoryMap[cat].tax);
+
+        const backgroundColors = [
+            '#6366f1', '#ec4899', '#8b5cf6', '#3b82f6', '#10b981', 
+            '#f59e0b', '#ef4444', '#14b8a6', '#64748b', '#d946ef'
+        ];
+
+        if (categoryChartInstance) {
+            categoryChartInstance.destroy();
+        }
+
+        const ctx = canvasElement.getContext('2d');
+        categoryChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: dataValues,
+                    backgroundColor: backgroundColors.slice(0, labels.length),
+                    borderWidth: 2,
+                    borderColor: '#ffffff',
+                    hoverOffset: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            font: { size: 11, family: 'sans-serif' }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw || 0;
+                                const index = context.dataIndex;
+                                const tax = taxValues[index] || 0;
+                                const percentage = totalFilteredSubItemAmount > 0 
+                                    ? ((value / totalFilteredSubItemAmount) * 100).toFixed(1) 
+                                    : 0;
+                                
+                                return [
+                                    ` 金額: ¥${Math.round(value).toLocaleString()} (${percentage}%)`,
+                                    ` 消費税: ¥${Math.round(tax).toLocaleString()}`
+                                ];
+                            }
+                        }
+                    }
+                },
+                cutout: '72%'
+            }
+        });
+    }
+    
+    // 2. レシート画像アップロード & AIマルチカテゴリ解析
+    // ==========================================
+    async function uploadAndAnalyzeReceipt(input) {
+        if (!input.files || !input.files[0]) return;
+
+        const file = input.files[0];
+
+        const compressedFile = await compressImage(file, 1200, 0.8); // Max 1200px width, 80% quality
+        
+        const formData = new FormData();
+        formData.append('receipt_image', compressedFile);
+
+        const editCard = document.getElementById('editCard');
+        if (editCard) editCard.classList.add('hidden');
+
+        const loadingOverlay = document.getElementById('aiLoadingOverlay');
+        if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+
+        
+        try {
+            const response = await fetch('/api/analyze-receipt', {
+                method: 'POST',
+                body: formData
+            });
+              
+            if (!response.ok) throw new Error('解析に失敗しました');
+
+            const result = await response.json();
+            if (result.success && result.data) {
+                renderReceiptForm(result.data);
+            } else {
+                throw new Error(result.error || 'データの取得に失敗しました');
+            }
+
+        } catch (error) {
+            alert('レシートの読み取りに失敗しました: ' + error.message);
+        } finally {
+            if (loadingOverlay) loadingOverlay.classList.add('hidden');
+            input.value = '';
+        }
+    }
+
+    // Helper function to resize and compress images in the browser
+    function compressImage(file, maxWidth, quality) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    canvas.toBlob((blob) => {
+                        resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+                    }, 'image/jpeg', quality);
+                };
+            };
+        });
+    }   
+
+    function renderReceiptForm(data) {
+        // 1. Populate basic header fields
+        const storeInput = document.getElementById('store_name');
+        if (storeInput) storeInput.value = data.store_name || '';
+
+        const dateInput = document.getElementById('receipt_date');
+        if (dateInput) dateInput.value = data.date || '';
+
+        const taxInput = document.getElementById('tax');
+        if (taxInput) taxInput.value = data.tax || 0;                
+
+        // 2. Render your itemized rows normally...
+        const container = document.getElementById('items-container'); 
+        if (container) {
+            container.innerHTML = '';
+            
+            const items = data.items || [];
+            if (items.length > 0) {
+                items.forEach(item => {
+                    container.appendChild(createItemRow(item.name, item.category, item.amount));
+                });
+            } else {
+            // Fallback: If no items, add one blank row
+            container.appendChild(createItemRow('', '食費', 0));
+            }
+        }
+        // 3. Set the modal total directly using Gemini's extracted total_amount (verbatim transcription)
+        const grandTotal = data.total_amount !== undefined ? data.total_amount : 0;
+        const totalDisplay = document.getElementById('computed-total');
+        if (totalDisplay) {
+            totalDisplay.textContent = '¥' + grandTotal.toLocaleString();
+        }
+
+        // 4. Update the hidden total input so saveExpense() picks up the correct total
+        const hiddenTotal = document.getElementById('hidden_total_amount');
+        if (hiddenTotal) {
+            hiddenTotal.value = grandTotal;
+        }
+    
+        console.log("🧾 Initial receipt loaded with verbatim total_amount:", grandTotal);
+
+        const modal = document.getElementById('editCard');
+        if (modal) {
+            modal.classList.remove('hidden');
+        }
+    }
+    
+    // ==========================================
+    // 4. 品目行（1行分）のHTMLを生成（全9種マルチカテゴリ対応）
+    // ==========================================
+    function createItemRow(name = '', category = '食費', amount = 0) {
+        const CATEGORIES = [
+            "食費", "日用品", "外食", "交通費", "娯楽", "固定費", "衣服・美容", "医療費", "その他"
+        ];
+
+        const row = document.createElement('div');
+        row.className = "item-row flex items-center gap-1.5 bg-gray-900 p-2 rounded-xl border border-gray-700 transition-all mb-2";
+        
+        row.innerHTML = `
+            <input type="text" name="item_name[]" value="${name}" placeholder="品目名" required
+                class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
+            
+            <select name="item_category[]" class="bg-gray-800 border border-gray-600 rounded-lg px-1.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
+                ${CATEGORIES.map(cat => `
+                    <option value="${cat}" ${cat === category ? 'selected' : ''}>${cat}</option>
+                `).join('')}
+            </select>
+            
+            <div class="relative w-24 sm:w-28 shrink-0">
+                <span class="absolute left-2.5 top-1.5 text-xs text-gray-400">¥</span>
+                <!-- Removed min="0" to prevent browser validation blocking empty/cleared fields -->
+                <input type="number" name="item_amount[]" value="${amount !== undefined ? amount : 0}" required oninput="calculateTotal()"
+                    class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-6 pr-2 py-1.5 text-xs text-right text-white font-mono focus:outline-none focus:border-[#912301]">
+            </div>
+            
+            <button type="button" onclick="removeItemRow(this)" class="text-gray-400 hover:text-red-400 p-1 text-sm font-bold rounded-lg transition-colors">✕</button>
+        `;
+        return row;
+    }
+
+    // ==========================================
+    // 5. 手動での品目行追加・削除および合計計算
+    // ==========================================
+    function addNewItemRow() {
+        const container = document.getElementById('items-container');
+        if (container) {
+            container.appendChild(createItemRow('', '食費', 0));
+        }
+    }
+
+    function removeItemRow(btn) {
+        const row = btn.closest('.item-row');
+        if (row) {
+            row.remove();
+            calculateTotal();
+        }
+    }    
+    
+    function calculateTotal() {
+        let sum = 0;
+        
+        // Sum up all current item amounts in the modal (supports negative discount values)
+        document.querySelectorAll('input[name="item_amount[]"]').forEach(input => {
+            sum += Number(input.value) || 0;
+        });
+
+        // Update the visual display in the modal
+        const totalDisplay = document.getElementById('computed-total');
+        if (totalDisplay) {
+            totalDisplay.textContent = '¥' + sum.toLocaleString();
+        }
+
+        // Also update the hidden total input so saveExpense() picks up the adjusted total
+        let hiddenTotal = document.getElementById('hidden_total_amount');
+        if (hiddenTotal) {
+            hiddenTotal.value = sum;
+        }
+
+        return sum;
+    }
+
+    // Ensure live calculation updates when typing in item amounts or discounts
+    document.addEventListener('input', function(e) {
+        if (e.target && e.target.matches('input[name="item_amount[]"]')) {
+            calculateTotal();
+        }
+    });
+
+    // ==========================================
+    // 6. 登録・破棄処理
+    // ==========================================
+    async function saveExpense(event) {
+        if (event) event.preventDefault();
+        console.log("🚀 saveExpense called successfully!");
+        
+        const form = document.getElementById('receipt-edit-form');
+        if (!form) return;
+        
+        // 1. Extract form values using your verified input IDs
+        const storeInput = document.getElementById('store_name');
+        const dateInput = document.getElementById('receipt_date');
+        
+        const rawStore = storeInput ? storeInput.value.trim() : '';
+        const date = dateInput ? dateInput.value : '';
+        
+        // 2. Determine total amount
+        let totalAmount = 0;
+        const totalAmountInput = document.getElementById('hidden_total_amount') || form.querySelector('input[name="total_amount"]');
+        if (totalAmountInput && totalAmountInput.value) {
+            totalAmount = Number(totalAmountInput.value) || 0;
+        } else {
+            form.querySelectorAll('input[name="item_amount[]"]').forEach(input => {
+                totalAmount += Number(input.value) || 0;
+            });
+        }
+
+        // Helper function to normalize store names
+        function normalizeStoreName(name) {
+            if (!name) return '';
+            return name
+                .toLowerCase()
+                .replace(/[0-9０-９]/g, '')
+                .replace(/[店支店株式会社合同会社]/g, '')
+                .replace(/[\s\-_・フェリーブー]/g, '')
+                .trim();
+        }
+
+        const currentStoreNormalized = normalizeStoreName(rawStore);
+        console.log("🔍 Checking Duplicate -> Normalized Form:", { store: currentStoreNormalized, date, totalAmount });
+
+        // 3. Check against allExpenses using English and legacy keys
+        const isDuplicate = allExpenses.some(item => {
+            const itemStoreRaw = item.store_name || item['店舗名'] || item.store || '';
+            const itemDate = item.date || item['日付'] || '';
+            const itemAmount = Number(
+                item.total_amount || 
+                item['total_amount'] || 
+                item['grand_total'] || 
+                item['合計'] || 
+                item['金額 (¥)'] || 
+                item.amount || 
+                0
+            );
+
+            const itemStoreNormalized = normalizeStoreName(itemStoreRaw);
+            const itemDateNormalized = String(itemDate).replace(/\//g, '-');
+            const formDateNormalized = String(date).replace(/\//g, '-');
+
+            const storeMatches = 
+                currentStoreNormalized === itemStoreNormalized ||
+                (currentStoreNormalized.length > 1 && itemStoreNormalized.includes(currentStoreNormalized)) ||
+                (itemStoreNormalized.length > 1 && currentStoreNormalized.includes(currentStoreNormalized));
+
+            const dateMatches = itemDateNormalized === formDateNormalized;
+            const amountMatches = itemAmount === totalAmount;
+
+            return storeMatches && dateMatches && amountMatches;
+        });
+
+        console.log("⚠️ Is Duplicate Result:", isDuplicate);
+
+        // 4. Prompt user if a duplicate is detected
+        if (isDuplicate) {
+            const proceed = confirm('⚠️ このレシート（店舗・日付・金額）はすでに登録されている可能性があります。\nもう一度登録しますか？');
+            if (!proceed) {
+                return; // Abort submission if user cancels
+            }
+        }
+
+        const formData = new FormData(form);
+        
+        try {
+            const res = await fetch('/add_receipt', { 
+                method: 'POST', 
+                body: formData 
+            });
+
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                alert('レシートの登録が完了しました！');
+                
+                const match = date.match(/(\d{4})[^\d]?(\d{1,2})/);
+                if (match) {
+                    const targetMonth = `${match[1]}-${match[2].padStart(2, '0')}`;
+                    window.location.href = `/?month=${targetMonth}`;
+                } else {
+                    location.reload();
+                }
+            } else {
+                alert('保存に失敗しました: ' + (data.error || '不明なエラー'));
+            }
+        } catch (e) {
+            alert('通信エラーが発生しました: ' + e.message);
+        }
+    }
+
+    function discardExpense() {
+        const editCard = document.getElementById('editCard');
+        if (editCard) editCard.classList.add('hidden');
+        const form = document.getElementById('receipt-edit-form');
+        if (form) form.reset();
+    }  
+    
+    /**
+     * Instantly resets the month filter back to the current real month
+     */
+    function resetToCurrentMonth() {
+        const select = document.getElementById('monthFilter');
+        if (!select) return;
+
+        // Generate current year-month string (e.g., "2026-11")
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const currentMonthKey = `${year}-${month}`;
+
+        // Check if the current month exists in the dropdown options
+        let exists = false;
+        for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === currentMonthKey) {
+                exists = true;
+                break;
+            }
+        }
+
+        // Set value if present, otherwise fallback to 'all'
+        select.value = exists ? currentMonthKey : 'all';
+
+        // Re-run filter and update UI
+        filterDataByMonth();
+    }
+
+    async function deleteExpense(docId) {
+        console.log("Deleting Firestore Document ID:", docId);
+        
+        if (!docId) {
+            alert('削除エラー: ドキュメントIDが見つかりません。');
+            return;
+        }
+
+        if (!confirm('この支出項目を削除しますか？')) return;
+
+        try {            
+            const response = await fetch('/api/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: docId })
+            });
+            
+            const res = await response.json();
+            console.log("Delete response:", res);
+
+            if (response.ok && res.success) {
+                // Preserve month dropdown state upon reload
+                const monthFilter = document.getElementById('monthFilter');
+                const currentMonth = monthFilter ? monthFilter.value : '';
+                
+                if (currentMonth && currentMonth !== 'all') {
+                    localStorage.setItem('hisa_last_month', currentMonth);
+                    window.location.href = `${window.location.pathname}?month=${currentMonth}`;
+                    return;
+                }
+                
+                location.reload();
+            } else {
+                alert('削除に失敗しました: ' + (res.error || '不明なエラー'));
+            }
+        } catch (error) {
+            console.error('Fetch error during deletion:', error);
+            alert('通信エラーが発生しました。');
+        }
+    }
+
+    function deleteAllExpenses() {
+        if(!confirm('本当にすべての支出データを削除しますか？')) return;
+
+        fetch('/api/delete-all', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(res => res.json())
+        .then(res => {
+            if(res.success) {
+                location.reload();
+            } else {
+                alert('全データの削除に失敗しました');
+            }
+        });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        // 監視対象とするセクションのID
+        const sections = document.querySelectorAll("#home-section, #scan-section, #history-section");
+        const navLinks = document.querySelectorAll(".nav-link");
+
+        const observerOptions = {
+            root: null,
+            rootMargin: "-20% 0px -50% 0px", // 画面の上から20%〜50%の位置に入ったときに反応
+            threshold: 0
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const targetId = entry.target.id;
+                    
+                    navLinks.forEach(link => {
+                        if (link.getAttribute("data-target") === targetId) {
+                            // アクティブ時（今見ているセクション）の色：赤色
+                            link.classList.remove("text-gray-400");
+                            link.classList.add("text-red-500");
+                        } else {
+                            // 非アクティブ時の色：グレー
+                            link.classList.remove("text-red-500");
+                            link.classList.add("text-gray-400");
+                        }
+                    });
+                }
+            });
+        }, observerOptions);
+
+        sections.forEach(section => {
+            if (section) observer.observe(section);
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const monthFilter = document.getElementById('monthFilter');
+        
+        // 1. Set the dropdown value FIRST from URL or LocalStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlMonth = urlParams.get('month');
+        
+        if (urlMonth && monthFilter) {
+            monthFilter.value = urlMonth;
+            localStorage.setItem('hisa_last_month', urlMonth);
+        } else {
+            const savedMonth = localStorage.getItem('hisa_last_month');
+            if (savedMonth && monthFilter) {
+                monthFilter.value = savedMonth;
+            }
+        }
+
+        // 2. Fetch fresh expenses from API
+        try {
+            const response = await fetch('/api/expenses');
+            const data = await response.json();
+            if (data.success) {
+                allExpenses = data.expenses;
+                console.log("📂 Fresh allExpenses loaded from API:", allExpenses);
+                if (allExpenses.length > 0) {
+                    console.table(allExpenses[0]);
+                    console.log("Keys available on first item:", Object.keys(allExpenses[0]));
+                }
+                
+                // 3. Render data AFTER the month filter value is already correctly set
+                if (typeof filterDataByMonth === 'function') {
+                    filterDataByMonth();
+                }
+            } else {
+                console.error("Failed to load expenses:", data.error);
+            }
+        } catch (e) {
+            console.error("Network error fetching expenses:", e);
+        }
+
+        // 4. Attach change listener to save selection to LocalStorage automatically
+        if (monthFilter) {
+            monthFilter.addEventListener('change', () => {
+                localStorage.setItem('hisa_last_month', monthFilter.value);
+                console.log("月フィルター変更:", monthFilter.value);
+                filterDataByMonth();
+            });
+        }
+
+        // 5. Attach search input events
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                filterDataByMonth();
+            });
+            searchInput.addEventListener('keyup', () => {
+                filterDataByMonth();
+            });
+        }
+    });
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js')
+                    .then(reg => console.log('Service Worker registered successfully:', reg.scope))
+                    .catch(err => console.log('Service Worker registration failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>

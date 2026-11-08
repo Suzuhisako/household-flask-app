@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ログイン - AI家計簿</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- manifest.json の読み込み（ログイン画面でもPWA要件を保持） -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#111827">
+</head>
+<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen">
+    <div class="bg-gray-800 p-8 rounded-2xl shadow-xl w-full max-w-md mx-4 border border-gray-700">
+        <div class="text-center mb-6">
+            <h1 class="text-2xl font-bold text-indigo-400">AI家計簿</h1>
+            <p class="text-xs text-gray-400 mt-1">家計簿データにアクセスするにはパスワードを入力してください</p>
+        </div>
+        
+        {% if error %}
+        <div class="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg mb-4 text-sm text-center">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium mb-1 text-gray-300">パスワード</label>
+                <input type="password" name="password" required autofocus
+                    class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-indigo-500 text-white placeholder-gray-500"
+                    placeholder="パスワードを入力">
+            </div>
+            <button type="submit"
+                class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-indigo-600/30">
+                ログインする
+            </button>
+        </form>
+    </div>
+</body>
+</html>

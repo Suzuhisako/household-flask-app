@@ -1,0 +1,8 @@
+flask
+google-genai
+pydantic
+google-cloud-storage
+google-cloud-firestore
+pandas
+gunicorn
+Pillow
