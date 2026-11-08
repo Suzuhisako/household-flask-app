@@ -29,3 +29,8 @@ A modern, responsive Progressive Web App (PWA) built with Flask and Tailwind CSS
    ```bash
    git clone [https://github.com/YOUR_USERNAME/your-repo-name.git](https://github.com/YOUR_USERNAME/your-repo-name.git)
    cd your-repo-name
+
+---
+
+## 📄 License
+This project is open-source and available under the MIT License.  
