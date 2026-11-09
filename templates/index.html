@@ -139,17 +139,19 @@
 
                 <!-- 消費税 & 合計金額エリア -->
                 <div class="grid grid-cols-2 gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
+                    <!-- 仕分け合計金額 -->
+                    <div>
+                        <label class="block text-[10px] text-gray-400 font-medium mb-1">合計金額 (円)</label>
+                        <input type="number" id="computed-total" name="computed_total" value="0"
+                            class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-6 pr-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#912301]">                        
+                    </div>
                     <!-- 消費税入力 -->
                     <div>
                         <label class="block text-[10px] text-gray-400 font-medium mb-1">消費税 (円)</label>
                         <input type="number" id="tax" name="tax" value="0"
                             class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
                     </div>
-                    <!-- 仕分け合計金額 -->
-                    <div class="text-right">
-                        <span class="block text-[10px] text-gray-400 font-medium mb-1">仕分け合計金額</span>
-                        <span id="computed-total" class="text-base font-bold text-white">¥0</span>
-                    </div>
+                    
                 </div>
 
                 <input type="hidden" id="hidden_total_amount" name="total_amount" value="0">
@@ -209,34 +211,34 @@
                 <!-- Side-by-side equal prominence layout -->
                 <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-50">
                     <div>
-                        <div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">商品合計 (税抜)</div>
+                        <div class="text-[10px] text-gray-600 font-medium uppercase tracking-wider">商品合計 (税抜)</div>
                         <div id="topTotalAmount" class="text-lg font-extrabold text-gray-900 font-mono mt-0.5">¥0</div>
                     </div>
-                    <div class="text-right">
-                        <div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">消費税</div>
-                        <div id="topTotalTax" class="text-lg font-extrabold text-indigo-600 font-mono mt-0.5">¥0</div>
+                    <div>
+                        <div class="text-[10px] text-gray-600 font-medium uppercase tracking-wider">消費税</div>
+                        <div id="topTotalTax" class="text-lg font-extrabold text-gray-900 font-mono mt-0.5">¥0</div>
                     </div>
                 </div>
             </div>
 
-            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mt-4">
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mt-4 relative z-20 overflow-visible">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-xs font-bold text-gray-600 uppercase tracking-wider">カテゴリ別内訳</h2>
                     <span class="text-[11px] font-medium text-gray-400">Donut Center Overview</span>
                 </div>
                 
-                <!-- Donut Chart Container with Centered Overlay -->
+                <!-- Donut Chart Container -->
                 <div class="relative w-full h-64 flex justify-center items-center">
                     <canvas id="categoryDonutChart"></canvas>
                     
-                    <!-- Floating Center Overlay inside the Donut Hole with strict tax-excluded terminology -->
-                    <div id="donutCenterOverlay" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
-                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">商品合計 (税抜)</span>
-                        <span id="centerTotalAmount" class="text-sm font-extrabold text-gray-900 font-mono">¥0</span>
-                        <span id="centerTotalTax" class="text-[10px] font-bold text-indigo-600 font-mono mt-0.5">消費税: ¥0</span>
+                    <!-- Floating Center Overlay -->
+                    <div id="donutCenterOverlay" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 text-center px-4">
+                        <span class="block text-sm font-extrabold text-gray-500 uppercase tracking-wider">商品合計 (税抜)</span>
+                        <span id="centerTotalAmount" class="block text-sm font-extrabold text-gray-500 font-mono">¥0</span>
+                        <span id="centerTotalTax" class="block text-sm font-extrabold text-gray-500 mt-0.5">消費税: ¥0</span>                        
                     </div>
                 </div>
-            </div>
+            </div>            
         </div>
 
         <!-- 🌟 2. 支出明細一覧（合計欄つきテーブル） -->
@@ -809,8 +811,8 @@
         const taxValues = sortedCategories.map(cat => categoryMap[cat].tax);
 
         const backgroundColors = [
-            '#6366f1', '#ec4899', '#8b5cf6', '#3b82f6', '#10b981', 
-            '#f59e0b', '#ef4444', '#14b8a6', '#64748b', '#d946ef'
+            '#600D07',  '#F4942F', '#a80d02', '#c25202', '#D0716D', 
+            '#F6ADDA',  '#ba2804', '#c78d06', '#B65B11',  '#5e3a3f'
         ];
 
         if (categoryChartInstance) {
@@ -842,6 +844,54 @@
                         }
                     },
                     tooltip: {
+                        enabled: false, // Disables internal canvas rendering so external DOM takes over
+                        external: function(context) {
+                            let tooltipEl = document.getElementById('chartjs-tooltip');
+                            if (!tooltipEl) {
+                                tooltipEl = document.createElement('div');
+                                tooltipEl.id = 'chartjs-tooltip';
+                                tooltipEl.className = 'fixed opacity-0 pointer-events-none transition-all duration-75 ease-in-out z-[99999] bg-slate-900 text-slate-100 px-3 py-2 rounded-lg shadow-2xl border border-slate-700 text-xs font-sans';
+                                document.body.appendChild(tooltipEl);
+                            }
+
+                            const tooltipModel = context.tooltip;
+                            if (tooltipModel.opacity === 0) {
+                                tooltipEl.style.opacity = 0;
+                                return;
+                            }
+
+                            // Build inner HTML contents from the callbacks
+                            let innerHtml = '';
+                            if (tooltipModel.title) {
+                                tooltipModel.title.forEach(title => {
+                                    innerHtml += `<div class="font-extrabold mb-1.5 pb-1 border-b border-slate-700 text-slate-200 tracking-wide text-xs">${title}</div>`;
+                                });
+                            }
+
+                            innerHtml += `<div class="space-y-1 font-mono text-xs">`;
+                            if (tooltipModel.body) {
+                                const bodyLines = tooltipModel.body.map(b => b.lines);
+                                bodyLines.forEach(body => {
+                                    if (Array.isArray(body)) {
+                                        body.forEach(line => {
+                                            innerHtml += `<div class="text-slate-300 whitespace-nowrap">${line}</div>`;
+                                        });
+                                    } else {
+                                        innerHtml += `<div class="text-slate-300 whitespace-nowrap">${body}</div>`;
+                                    }
+                                });
+                            }
+                            innerHtml += `</div>`;
+
+                            tooltipEl.innerHTML = innerHtml;
+
+                            // Position relative to viewport using canvas bounding rect
+                            const position = context.chart.canvas.getBoundingClientRect();
+                            tooltipEl.style.opacity = 1;
+                            tooltipEl.style.left = position.left + tooltipModel.caretX + 'px';
+                            tooltipEl.style.top = position.top + tooltipModel.caretY + 'px';
+                            tooltipEl.style.transform = 'translate(-50%, -100%) translateY(-10px)';
+                        },
                         callbacks: {
                             label: function(context) {
                                 const value = context.raw || 0;
@@ -858,6 +908,7 @@
                             }
                         }
                     }
+                    
                 },
                 cutout: '72%'
             }
@@ -967,7 +1018,7 @@
         const grandTotal = data.total_amount !== undefined ? data.total_amount : 0;
         const totalDisplay = document.getElementById('computed-total');
         if (totalDisplay) {
-            totalDisplay.textContent = '¥' + grandTotal.toLocaleString();
+            totalDisplay.value = Math.round(grandTotal);
         }
 
         // 4. Update the hidden total input so saveExpense() picks up the correct total
@@ -1046,7 +1097,7 @@
         // Update the visual display in the modal
         const totalDisplay = document.getElementById('computed-total');
         if (totalDisplay) {
-            totalDisplay.textContent = '¥' + sum.toLocaleString();
+            totalDisplay.value = Math.round(sum);
         }
 
         // Also update the hidden total input so saveExpense() picks up the adjusted total
@@ -1361,6 +1412,20 @@
             });
             searchInput.addEventListener('keyup', () => {
                 filterDataByMonth();
+            });
+        }
+
+        const computedTotalInput = document.getElementById('computed-total');
+        if (computedTotalInput) {
+            computedTotalInput.addEventListener('input', function(event) {
+                const manualTotal = parseFloat(event.target.value) || 0;
+                
+                // Keep your active receipt state in sync if you store parsed data globally
+                if (typeof currentReceiptData !== 'undefined' && currentReceiptData) {
+                    currentReceiptData.manual_total_override = manualTotal;
+                }
+                
+                console.log('Manual total correction updated:', manualTotal);
             });
         }
     });
