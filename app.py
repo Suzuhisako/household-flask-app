@@ -11,10 +11,11 @@ from enum import Enum
 from datetime import datetime
 import re
 import unicodedata
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Any, Tuple
 from google.cloud import firestore
 import time
 from google.api_core.exceptions import InternalServerError, ServiceUnavailable
+
 
 # --- 🚀 初期設定 ---
 app = Flask(__name__)
@@ -174,37 +175,59 @@ def index():
         return render_template('index.html', expenses=[], total_amount=0, total_tax=0, error=str(e))
 
 def analyze_receipt_with_retry(image_bytes, mime_type, retries=3, delay=2):
-    prompt_text = """
-    You are an expert Japanese receipt parsing assistant. Extract the structured data from this receipt image into strict JSON format with the following keys:
+    RECEIPT_SYSTEM_PROMPT = """
+    ### Japanese Receipt Parsing & Tax Calculation Rules
 
-    1. "store_name": (string) The name of the merchant/store.
-    2. "date": (string) The transaction date in YYYY-MM-DD format.
-    3. "total_amount": (integer) The final grand total amount paid (including consumption tax). 
-    - Look specifically for keywords preceding or near this amount such as: 合計, 領収金額, 総計, 請求金額, or 御代.
-    - Always extract the final payable amount verbatim without doing any calculations or falling back to tax-excluded subtotals.
-    4. "tax": (integer) The consumption tax amount printed on the receipt (labeled as 内税, 内消費税, or 消費税). Extract verbatim.
-    5. "items": (array of objects) Each containing:
-    - "name": (string) Item name
-    - "category": (string) Appropriate category (e.g., 食費, 日用品, 医療費, etc.)
-    - "amount": (integer) Line item price
-    """
+    You are an expert financial receipt parser specializing in Japanese retail, restaurant, and supermarket receipts. Japanese receipts frequently mix tax-inclusive pricing, tax-exclusive pricing, store discounts, and separate tax summaries. Follow these rules strictly when extracting data into JSON:
+
+    1. **Detect Tax Type (税区分):**
+    - Identify whether items are **tax-inclusive (内税 / 込)** or **tax-exclusive (外税)** by checking store labels, item line suffixes, or summary notes.
+    - Look for keywords: `内税` / `（内）` / `税込` mean taxes are already embedded in item prices. `外税` / `本体価格` mean tax must be added on top.
+
+    2. **Item Pricing Rule:**
+    - If the receipt uses **tax-inclusive (内税)** pricing, the price printed on each item line is the final amount paid by the customer (already including consumption tax).
+    - Extract item prices exactly as printed without stripping out the tax per line item unless an explicit base price (本体価格) is provided.
+
+    3. **Total Amount (`total_amount`) Rule:**
+    - The `total_amount` must equal the final grand total paid by the customer (the actual cash/card total at the bottom of the receipt).
+
+    4. **Tax Amount (`tax_amount`) & Double-Counting Prevention:**
+    - **CRITICAL:** If items are tax-inclusive (`内税`), the summary tax line printed at the bottom (e.g., `(内消費税等 ¥XX)`) is an **informational breakdown only**. 
+    - **DO NOT** add the summary tax amount on top of the item subtotal. 
+    - If `total_amount` is tax-inclusive, set `tax_amount` to the extracted consumption tax breakdown value for reporting, but ensure your calculation model treats `total_amount` as the ceiling (i.e., Subtotal = Total - Tax).
+    - If items are tax-exclusive (`外税`), compute or extract the added tax correctly so that `total_amount = subtotal + tax_amount`.
+
+    5. **JSON Output Structure:**
+    Return a clean JSON object with:
+    - `store_name`: string
+    - `date`: string (YYYY-MM-DD format)
+    - `tax_type`: string ("inclusive", "exclusive", or "mixed")
+    - `subtotal`: number (total before tax)
+    - `tax_amount`: number (total consumption tax)
+    - `total_amount`: number (final grand total)
+    - `items`: array of objects (`name`, `price`, `tax_rate` e.g., 0.08 or 0.10)
+    """  
 
     contents = [
         types.Part.from_bytes(data=image_bytes, mime_type=mime_type or 'image/jpeg'),
-        prompt_text
+        "Extract the receipt details into the requested JSON schema adhering to the system rules."
     ]
 
     for attempt in range(retries):
         try:
-            return client.models.generate_content(
-                model='gemini-2.5-flash',
+            response = client.models.generate_content(
+                model='gemini-3.5-flash', 
                 contents=contents,
                 config=types.GenerateContentConfig(
+                    system_instruction=RECEIPT_SYSTEM_PROMPT, 
                     response_mime_type="application/json",
                     response_schema=ReceiptAnalysis,
                     temperature=0.1
                 )
             )
+
+            return response            
+        
         except (ServiceUnavailable, InternalServerError) as e:
             if attempt == retries - 1:
                 raise e
@@ -221,17 +244,89 @@ def analyze_receipt():
 
     try:
         response = analyze_receipt_with_retry(image_bytes, mime_type)
+        
+        # When using response_schema with Google GenAI SDK, parsed object is available
         parsed_data = response.parsed
+        
+        # Convert Pydantic model or dict to standard dictionary
+        data_dict = parsed_data.dict() if hasattr(parsed_data, 'dict') else dict(parsed_data)
+        
+        # Run through validation logic to prevent double-counting or math errors
+        cleaned_data, audit_logs = validate_and_fix_receipt_totals(data_dict)
+        
+        if audit_logs:
+            print("Receipt validator audit notes:", audit_logs)
 
         return jsonify({
             "success": True, 
-            "data": parsed_data.dict() if hasattr(parsed_data, 'dict') else parsed_data
+            "data": cleaned_data
         })
 
     except Exception as e:
         print(f"Receipt analysis error: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": str(e)}), 500    
 
+def validate_and_fix_receipt_totals(data: Dict[Any, Any]) -> Tuple[Dict[Any, Any], list]:
+    """
+    Validates and adjusts receipt subtotal, tax_amount, and total_amount.
+    Ensures tax-inclusive (内税) receipts do not double-count tax,
+    and tax-exclusive (外税) receipts correctly sum up.
+    """
+    errors = []
+    
+    # Extract numeric values, defaulting missing keys to 0
+    subtotal = float(data.get("subtotal", 0) or 0)
+    tax_amount = float(data.get("tax_amount", 0) or 0)
+    total_amount = float(data.get("total_amount", 0) or 0)
+    tax_type = str(data.get("tax_type", "inclusive")).lower()
+    
+    # Calculate sum of individual line items if present
+    items = data.get("items", [])
+    items_sum = sum(float(item.get("price", 0) or 0) for item in items) if items else 0.0
+
+    # CASE 1: Tax-Inclusive Receipts (内税 / 税込)
+    if tax_type == "inclusive":
+        # For inclusive receipts, the grand total paid equals the items sum
+        if total_amount == 0 and items_sum > 0:
+            total_amount = items_sum
+            
+        # Ensure subtotal represents the base amount before tax (Subtotal = Total - Tax)
+        computed_subtotal = round(total_amount - tax_amount, 2)
+        
+        # If Gemini returned subtotal equal to total_amount, adjust subtotal to base price
+        if subtotal == total_amount and tax_amount > 0:
+            subtotal = computed_subtotal
+            
+        # Prevent double-counting: verify total_amount is not (items_sum + tax_amount)
+        if abs(total_amount - (items_sum + tax_amount)) < 1.0 and tax_amount > 0:
+            # Gemini mistakenly added tax on top of tax-inclusive total
+            total_amount = items_sum
+            errors.append("Fixed double-counted tax on inclusive receipt.")
+
+    # CASE 2: Tax-Exclusive Receipts (外税)
+    elif tax_type == "exclusive":
+        # For exclusive receipts, Subtotal + Tax = Total
+        if subtotal == 0 and items_sum > 0:
+            subtotal = items_sum
+            
+        computed_total = round(subtotal + tax_amount, 2)
+        if abs(total_amount - computed_total) > 1.0:
+            total_amount = computed_total
+            errors.append("Corrected total_amount for exclusive tax receipt.")
+
+    # CASE 3: General Fallback / Mixed
+    else:
+        if total_amount == 0:
+            total_amount = items_sum if items_sum > 0 else (subtotal + tax_amount)
+        if subtotal == 0:
+            subtotal = max(0.0, total_amount - tax_amount)
+
+    # Write cleaned values back into the data dictionary
+    data["subtotal"] = round(subtotal, 2)
+    data["tax_amount"] = round(tax_amount, 2)
+    data["total_amount"] = round(total_amount, 2)
+    
+    return data, errors
 
 def calculate_category_summary(expenses):
     """
@@ -257,8 +352,10 @@ def calculate_category_summary(expenses):
             summary[cat]['amount'] += amount
             summary[cat]['count'] += 1
             
-    return summary   
-    
+    return summary  
+
+
+  
 @app.route('/add_receipt', methods=['POST'])
 @app.route('/api/save', methods=['POST'])  # フロントエンドがどちらを叩いても対応できるように両方設置
 def add_receipt():
