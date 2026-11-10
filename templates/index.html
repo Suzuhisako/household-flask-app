@@ -141,13 +141,13 @@
                 <div class="grid grid-cols-2 gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
                     <!-- 仕分け合計金額 -->
                     <div>
-                        <label class="block text-[10px] text-gray-400 font-medium mb-1">合計金額 (円)</label>
+                        <label class="block text-[10px] text-gray-400 font-medium mb-1">税込み合計金額 (円)</label>
                         <input type="number" id="computed-total" name="computed_total" value="0"
                             class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-6 pr-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#912301]">                        
                     </div>
                     <!-- 消費税入力 -->
                     <div>
-                        <label class="block text-[10px] text-gray-400 font-medium mb-1">消費税 (円)</label>
+                        <label class="block text-[10px] text-gray-400 font-medium mb-1">内消費税 (円)</label>
                         <input type="number" id="tax" name="tax" value="0"
                             class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
                     </div>
@@ -274,19 +274,6 @@
                                     <div class="text-xs font-bold text-indigo-600 mt-0.5">税: ¥{{ "{:,}".format(item.get('消費税 (¥)', 0) | int) }}</div>
                                 </td>
 
-                                <!--                                
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center space-x-2">
-                                        
-                                        <button onclick="toggleReceiptDetails('${receipt.id}')" class="px-2 py-0.5 text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors">
-                                            AI詳細
-                                        </button>
-                                    </div>
-                                    
-                                    <button onclick="deleteReceipt('${receipt.id}')" class="text-gray-400 hover:text-red-500">...</button>
-                                </div>
-                                -->
-
                                 <!-- Expandable Sub-Table Container (Hidden by default) -->
                                 <div id="details-${receipt.id}" class="hidden mt-3 pt-3 border-t border-gray-100 bg-gray-50/50 rounded-xl p-3 text-xs">
                                     <div class="font-bold text-gray-700 mb-2">AI解析・商品内訳</div>
@@ -329,10 +316,10 @@
             <!-- ★ CSVダウンロードボタン -->
             {% if expenses %}
             <div class="mt-6 pt-4 border-t border-gray-700 flex gap-3">
-                <a id="exportCsvBtn" href="/api/export-csv?month=ALL" class="bg-lime-800 hover:bg-lime-950 text-white font-bold py-2 px-4 rounded-xl shadow-sm transition inline-flex items-center">
+                <a id="exportCsvBtn" href="/api/export-csv?month=ALL" class="bg-amber-800 hover:bg-amber-900 text-white font-bold py-2 px-4 rounded-xl shadow-sm transition inline-flex items-center">
                     CSVエクスポート
                 </a>
-                <button onclick="deleteAllExpenses()" class="flex-1 bg-lime-700 hover:bg-lime-950 text-white font-bold py-2 px-4 rounded-xl shadow-sm transition inline-flex items-center justify-center">
+                <button onclick="deleteAllExpenses()" class="flex-1 bg-orange-700 hover:bg-orange-900 text-white font-bold py-2 px-4 rounded-xl shadow-sm transition inline-flex items-center justify-center">
                     全データ削除
                 </button>
             </div>
@@ -1007,13 +994,22 @@
             const items = data.items || [];
             if (items.length > 0) {
                 items.forEach(item => {
-                    container.appendChild(createItemRow(item.name, item.category, item.amount));
+                    // AUTOMATIC TAX RATE ASSIGNMENT:
+                    // If category is "食費" (Food), default to 8% (0.08). Otherwise, default to standard 10% (0.10).
+                    // (You can also honor item.tax_rate if your backend AI provides it directly)
+                    let taxRate = 0.10;
+                    if (item.category === '食費' || item.tax_rate === 0.08) {
+                                taxRate = 0.08;
+                    }
+                            
+                    container.appendChild(createItemRow(item.name, item.category, item.amount, taxRate));
                 });
             } else {
-            // Fallback: If no items, add one blank row
-            container.appendChild(createItemRow('', '食費', 0));
+                // Fallback: If no items, add one blank row defaulting to "食費" at 8%
+                container.appendChild(createItemRow('', '食費', 0, 0.08));
             }
         }
+           
         // 3. Set the modal total directly using Gemini's extracted total_amount (verbatim transcription)
         const grandTotal = data.total_amount !== undefined ? data.total_amount : 0;
         const totalDisplay = document.getElementById('computed-total');
@@ -1026,6 +1022,9 @@
         if (hiddenTotal) {
             hiddenTotal.value = grandTotal;
         }
+
+        // 5. Trigger calculateTotal() immediately so the mixed 8%/10% tax total populates on open
+        calculateTotal();
     
         console.log("🧾 Initial receipt loaded with verbatim total_amount:", grandTotal);
 
@@ -1038,7 +1037,7 @@
     // ==========================================
     // 4. 品目行（1行分）のHTMLを生成（全9種マルチカテゴリ対応）
     // ==========================================
-    function createItemRow(name = '', category = '食費', amount = 0) {
+    function createItemRow(name = '', category = '食費', amount = 0, taxRate = 0.08) {
         const CATEGORIES = [
             "食費", "日用品", "外食", "交通費", "娯楽", "固定費", "衣服・美容", "医療費", "その他"
         ];
@@ -1056,11 +1055,16 @@
                 `).join('')}
             </select>
             
-            <div class="relative w-24 sm:w-28 shrink-0">
-                <span class="absolute left-2.5 top-1.5 text-xs text-gray-400">¥</span>
-                <!-- Removed min="0" to prevent browser validation blocking empty/cleared fields -->
+            <!-- Compact Tax Rate Selector (8% for food, 10% for standard) -->
+            <select name="item_tax_rate[]" onchange="calculateTotal()" class="bg-gray-800 border border-gray-600 rounded-lg px-1.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-[#912301]">
+                <option value="0.08" ${taxRate === 0.08 ? 'selected' : ''}>8%</option>
+                <option value="0.10" ${taxRate === 0.10 ? 'selected' : ''}>10%</option>
+            </select>
+            
+            <div class="relative w-20 sm:w-24 shrink-0">
+                <span class="absolute left-2 top-1.5 text-xs text-gray-400">¥</span>
                 <input type="number" name="item_amount[]" value="${amount !== undefined ? amount : 0}" required oninput="calculateTotal()"
-                    class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-6 pr-2 py-1.5 text-xs text-right text-white font-mono focus:outline-none focus:border-[#912301]">
+                    class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-5 pr-1.5 py-1.5 text-xs text-right text-white font-mono focus:outline-none focus:border-[#912301]">
             </div>
             
             <button type="button" onclick="removeItemRow(this)" class="text-gray-400 hover:text-red-400 p-1 text-sm font-bold rounded-lg transition-colors">✕</button>
@@ -1088,22 +1092,39 @@
     
     function calculateTotal() {
         let sum = 0;
+        let totalTax = 0;
         
-        // Sum up all current item amounts in the modal (supports negative discount values)
-        document.querySelectorAll('input[name="item_amount[]"]').forEach(input => {
-            sum += Number(input.value) || 0;
+        // Loop through each item row
+        document.querySelectorAll('.item-row').forEach(row => {
+            const priceInput = row.querySelector('input[name="item_amount[]"]');
+            const rateSelect = row.querySelector('select[name="item_tax_rate[]"]');
+            
+            const price = Number(priceInput?.value) || 0;
+            const rate = rateSelect ? Number(rateSelect.value) : 0.08;
+            
+            sum += price;
+            
+            // Exact embedded tax calculation per item: Tax = Price * (rate / (1 + rate))
+            const itemTax = price * (rate / (1 + rate));
+            totalTax += itemTax;
         });
 
-        // Update the visual display in the modal
+        // Update the visual total display
         const totalDisplay = document.getElementById('computed-total');
         if (totalDisplay) {
             totalDisplay.value = Math.round(sum);
         }
 
-        // Also update the hidden total input so saveExpense() picks up the adjusted total
-        let hiddenTotal = document.getElementById('hidden_total_amount');
+        // Update hidden total for backend submission
+        const hiddenTotal = document.getElementById('hidden_total_amount');
         if (hiddenTotal) {
             hiddenTotal.value = sum;
+        }
+
+        // Update the visual tax input with the precise combined sum of 8% and 10% items
+        const taxInput = document.getElementById('tax');
+        if (taxInput) {
+            taxInput.value = Math.round(totalTax);
         }
 
         return sum;
