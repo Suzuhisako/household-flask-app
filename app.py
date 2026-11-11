@@ -31,6 +31,11 @@ if not APP_PASSWORD:
 
 # Google Cloud Project ID (Safe to keep default fallback if needed, but cleaner via env)
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'commanding-fact-481507-n7')
+client = genai.Client(
+    vertexai=True, 
+    project=PROJECT_ID,
+    location='asia-northeast1' 
+)
 
 # --- 🔒 認証 & PWAルート制御 (Before Request) ---
 @app.before_request
