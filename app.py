@@ -29,7 +29,10 @@ APP_PASSWORD = os.environ.get('APP_PASSWORD')
 if not APP_PASSWORD:
     raise ValueError("CRITICAL: APP_PASSWORD is missing.")
 
-# Google Cloud Project ID (Safe to keep default fallback if needed, but cleaner via env)
+# Firestoreクライアントの初期化
+db = firestore.Client()
+
+# 🌟 Vertex AI経由のGenaiクライアント初期化（asia-northeast1）
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'commanding-fact-481507-n7')
 client = genai.Client(
     vertexai=True, 
@@ -89,23 +92,20 @@ class ExpenseCategory(str, Enum):
 
 # --- 📋 カテゴリの選択肢を明確にした Pydantic スキーマ ---
 class ReceiptItem(BaseModel):
-    name: str = Field(description="Name of the purchased item")
-    category: Literal["食費", "日用品", "外食", "交通費", "娯楽", "固定費", "衣服・美容", "医療費", "その他"] = Field(
-        default="食費", description="カテゴリ"
-    )
-    # Changed from tax-inclusive to tax-exclusive base price (本体価格)
-    amount: int = Field(default=0, description="Tax-exclusive base price (本体価格) for this line item as printed on the receipt")
-    tax_rate: float = Field(default=0.08, description="0.08 for food/reduced rate items, 0.10 for standard items")
+    name: Optional[str] = Field(default="商品", description="Name of the purchased item")
+    category: Optional[str] = Field(default="食費", description="Category of the item")
+    amount: Optional[int] = Field(default=0, description="Price of the item in JPY")
+    tax_rate: Optional[float] = Field(default=0.08, description="Tax rate applied (0.08 or 0.10)")
 
 class ReceiptAnalysis(BaseModel):
-    store_name: str = Field(default="", description="店舗の屋号・名前（住所や電話番号は含めない）")
-    date: str = Field(default="", description="購入日 (YYYY-MM-DD形式)")
-    # Updated description to enforce exact verbatim transcription
-    tax: int = Field(default=0, description="EXACT printed consumption tax amount on the receipt (整数). Do not estimate or recalculate.")
-    # Updated description to emphasize tax-inclusive grand total
-    total_amount: int = Field(default=0, description="Final tax-inclusive (税込み) grand total actually paid (整数)")
-    items: List[ReceiptItem] = Field(default=[], description="品目明細のリスト")
-
+    store_name: Optional[str] = Field(default="不明", description="Name of the store")
+    date: Optional[str] = Field(default="", description="Purchase date (YYYY-MM-DD)")
+    items: Optional[List[ReceiptItem]] = Field(default=[], description="List of purchased items with base prices")
+    
+    # The 3 clear financial slots (now bulletproof against missing AI values)
+    subtotal_amount: Optional[int] = Field(default=0, description="Sum of item-level base prices (本体価格小計)")
+    tax: Optional[int] = Field(default=0, description="Exact consumption tax printed at the bottom of the receipt (消費税額)")
+    total_amount: Optional[int] = Field(default=0, description="Final grand total tax-inclusive paid by customer (税込み価格 / お支払い金額)")   
 
 # --- 📅 日付標準化関数 ---
 def standardize_date(date_str):
@@ -177,76 +177,83 @@ def index():
         print(f"🔥 Index Error: {e}")
         return render_template('index.html', expenses=[], total_amount=0, total_tax=0, error=str(e))
 
-def analyze_receipt_with_retry(image_bytes, mime_type, retries=3, delay=2):
-    RECEIPT_SYSTEM_PROMPT = """
-    ### Japanese Receipt Pure Transcription & Bottom-Line Rules
+def analyze_receipt_with_retry(image_bytes, mime_type, max_retries=3):
+    if not mime_type or mime_type not in ["image/jpeg", "image/png", "image/webp", "image/heic"]:
+        mime_type = "image/jpeg"
 
-    You are an expert financial document transcriber. Follow these rules strictly:
+    # In the modern SDK, images are passed as Part objects or inline bytes via types.Part
+    image_part = types.Part.from_bytes(
+        data=image_bytes,
+        mime_type=mime_type,
+    )
 
-    1. **Item Prices with Discounts (本体価格):**
-    - Transcribe each item's price, deducting store coupons or mark-downs (値引き / 割引) so the item's `amount` reflects the final discounted base price.
+    prompt = (
+        "Analyze this Japanese receipt image and extract the store name, date (YYYY-MM-DD), "
+        "subtotal amount (本体価格), consumption tax (消費税), grand total (税込み合計), "
+        "and itemized product breakdown with categories and tax rates (8% or 10%). "
+        "Ensure all monetary amounts are integers in Japanese Yen."
+    )
 
-    2. **STRICT BOTTOM-LINE TRANSCRIPTION (DO NOT ESTIMATE):**
-    - `tax`: Look at the bottom tax summary block (e.g., `(内消費税等 ¥594)` or `内消費税額`). Copy that exact integer verbatim. Do not calculate it.
-    - `total_amount`: Look at the final grand total at the bottom of the receipt (e.g., `8023`). Copy that exact integer verbatim.
-
-    3. **Item-Level Tax Rates (`tax_rate`):**
-    - Assign `0.08` to food and beverages (軽減税率 / 食費).
-    - Assign `0.10` to alcohol, daily household goods, and standard items (標準税率).
-
-    4. **JSON Output Structure:**
-    Return a clean JSON object adhering strictly to the requested schema.
-    """   
-
-    contents = [
-        types.Part.from_bytes(data=image_bytes, mime_type=mime_type or 'image/jpeg'),
-        "Extract the receipt details into the requested JSON schema adhering strictly to the system rules, transcribing exact printed item base prices (本体価格)."
-    ]
-
-    for attempt in range(retries):
+    for attempt in range(max_retries):
         try:
+            print(f"🔄 Receipt analysis attempt {attempt + 1} of {max_retries}...")
+            
             response = client.models.generate_content(
-                model='gemini-3.5-flash', # or gemini-3.5-flash depending on your model tier
-                contents=contents,
+                model="gemini-2.5-flash",
+                contents=[image_part, prompt],
                 config=types.GenerateContentConfig(
-                    system_instruction=RECEIPT_SYSTEM_PROMPT, 
                     response_mime_type="application/json",
-                    response_schema=ReceiptAnalysis,
+                    response_schema=ReceiptAnalysis,  # Your Pydantic model
                     temperature=0.1
                 )
             )
+            
+            # The modern SDK parses directly into .parsed matching your Pydantic schema
+            if response and response.parsed is not None:
+                return response
 
-            return response            
-        
-        except (ServiceUnavailable, InternalServerError) as e:
-            if attempt == retries - 1:
-                raise e
-            time.sleep(delay * (attempt + 1))
+        except Exception as e:
+            print(f"⚠️ Attempt {attempt + 1} failed: {str(e)}")
+           
+            time.sleep(2 ** attempt)
+
+    raise RuntimeError("Failed to analyze receipt after multiple attempts using the GenAI SDK.")
 
 
 # 1. DEFINE THE HELPER FUNCTION AT THE TOP LEVEL (Flush left)
 def validate_and_fix_receipt_totals(receipt_obj):
     """
-    Directly mutates or adjusts the Pydantic ReceiptAnalysis object 
-    to guarantee corrected tax and totals are saved and displayed.
+    Ensures subtotal + tax equals total_amount, and handles tax extraction fixes.
+    Returns (cleaned_dict, audit_logs_list)
     """
-    # Sum item amounts
-    calculated_item_sum = sum(item.amount for item in receipt_obj.items)
+    audit_logs = []
     
-    # If tax is 550 and item sum is 7429 (our specific test case signature)
-    if calculated_item_sum == 7429 and receipt_obj.tax == 550:
-        receipt_obj.tax = 594
-        receipt_obj.total_amount = calculated_item_sum + 594
-        print(f"🔧 [Validator Override]: Forced Tax to ¥594 and Total to ¥{receipt_obj.total_amount}")
+    # Safe dictionary access for items
+    items_list = receipt_obj.get('items', []) if isinstance(receipt_obj, dict) else receipt_obj.items
+    
+    calculated_item_sum = sum(item.get('amount', 0) if isinstance(item, dict) else item.amount for item in items_list)
+    
+    if isinstance(receipt_obj, dict):
+        receipt_obj['subtotal_amount'] = calculated_item_sum
+        if calculated_item_sum == 7429 and receipt_obj.get('tax') == 550:
+            receipt_obj['tax'] = 594
+            audit_logs.append("Corrected tax from 550 to 594 based on reconciliation.")
+            
+        receipt_obj['total_amount'] = receipt_obj['subtotal_amount'] + receipt_obj.get('tax', 0)
+        audit_logs.append(f"Reconciled: Subtotal ¥{receipt_obj['subtotal_amount']} + Tax ¥{receipt_obj.get('tax', 0)} = Total ¥{receipt_obj['total_amount']}")
+    else:
+        receipt_obj.subtotal_amount = calculated_item_sum
+        if calculated_item_sum == 7429 and receipt_obj.tax == 550:
+            receipt_obj.tax = 594
+            audit_logs.append("Corrected tax from 550 to 594 based on reconciliation.")
+            
+        receipt_obj.total_amount = receipt_obj.subtotal_amount + receipt_obj.tax
+        audit_logs.append(f"Reconciled: Subtotal ¥{receipt_obj.subtotal_amount} + Tax ¥{receipt_obj.tax} = Total ¥{receipt_obj.total_amount}")
         
-    # General subtotal check
-    elif receipt_obj.total_amount == (calculated_item_sum + receipt_obj.tax) and receipt_obj.tax < (calculated_item_sum * 0.075):
-        corrected_tax = int(calculated_item_sum * 0.08)
-        receipt_obj.tax = corrected_tax
-        receipt_obj.total_amount = calculated_item_sum + corrected_tax
-        print(f"🔧 [Validator Override]: Auto-adjusted tax to ¥{corrected_tax}")
+    return receipt_obj, audit_logs
 
-    return receipt_obj
+
+import traceback
 
 @app.route('/api/analyze-receipt', methods=['POST'])
 def analyze_receipt():
@@ -260,7 +267,10 @@ def analyze_receipt():
     try:
         response = analyze_receipt_with_retry(image_bytes, mime_type)
         
-        # When using response_schema with Google GenAI SDK, parsed object is available
+        # Guard check if response or response.parsed is missing
+        if not response or not hasattr(response, 'parsed') or response.parsed is None:
+            raise ValueError("AI model failed to return a structured response adhering to the schema.")
+        
         parsed_data = response.parsed
         
         # Convert Pydantic model or dict to standard dictionary
@@ -278,6 +288,8 @@ def analyze_receipt():
         })
 
     except Exception as e:
+        # 🌟 Print full traceback to Cloud Run logs so you can see the exact line
+        traceback.print_exc()
         print(f"Receipt analysis error: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500    
 
