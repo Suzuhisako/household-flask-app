@@ -137,23 +137,38 @@
                     </button>
                 </div>
 
-                <!-- 消費税 & 合計金額エリア -->
+                <!-- 消費税 & 合計金額エリア
                 <div class="grid grid-cols-2 gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
-                    <!-- 仕分け合計金額 -->
                     <div>
                         <label class="block text-[10px] text-gray-400 font-medium mb-1">税込み合計金額 (円)</label>
                         <input type="number" id="computed-total" name="computed_total" value="0"
                             class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-6 pr-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#912301]">                        
                     </div>
-                    <!-- 消費税入力 -->
                     <div>
                         <label class="block text-[10px] text-gray-400 font-medium mb-1">内消費税 (円)</label>
                         <input type="number" id="tax" name="tax" value="0"
                             class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
-                    </div>
-                    
-                </div>
+                    </div>                    
+                </div> -->
 
+                <div class="grid grid-cols-3 gap-2 text-center p-3 bg-gray-50 rounded-lg">
+                    <div>
+                        <span class="text-xs text-gray-500 block">本体価格 (Subtotal)</span>
+                        <span class="font-bold text-gray-800" id="modal-subtotal">¥0</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-500 block">消費税 (Tax)</span>
+                        <span class="font-bold text-gray-800" id="modal-tax">¥0</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-500 block">税込み合計 (Total)</span>
+                        <span class="font-bold text-indigo-600" id="modal-total">¥0</span>
+                    </div>            
+                </div>
+                
+                <!-- Hidden inputs to submit calculated values to Flask backend -->
+                <input type="hidden" id="hidden_subtotal_amount" name="subtotal_amount" value="0">
+                <input type="hidden" id="hidden_tax" name="tax" value="0">
                 <input type="hidden" id="hidden_total_amount" name="total_amount" value="0">
 
                 <!-- 保存・破棄ボタン -->
@@ -463,10 +478,8 @@
         const selectedMonth = monthSelect ? monthSelect.value : 'all';
         const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : '';
 
-        let filtered = [];
-
         // 🌟 Unified Filtering: Respects both Month Dropdown AND Search Query simultaneously
-        filtered = allExpenses.filter(item => {
+        let filtered = allExpenses.filter(item => {
             // 1. Month validation check
             const dateStr = item['日付'] || item['date'] || '';
             const monthMatch = (!selectedMonth || selectedMonth === 'all' || dateStr.startsWith(selectedMonth));
@@ -958,7 +971,7 @@
                     let height = img.height;
 
                     if (width > maxWidth) {
-                        height = Math.round((height * maxWidth) / width);
+                        height = Math.round((height * maxWidth) / width); 
                         width = maxWidth;
                     }
 
@@ -1010,11 +1023,25 @@
             }
         }
            
-        // 3. Set the modal total directly using Gemini's extracted total_amount (verbatim transcription)
+        // 1. Populate Subtotal (本体価格)
+        const subtotal = data.subtotal_amount !== undefined ? data.subtotal_amount : 0;
+        const subtotalDisplay = document.getElementById('modal-subtotal');
+        if (subtotalDisplay) {
+            subtotalDisplay.textContent = `¥${Math.round(subtotal).toLocaleString()}`;
+        }
+
+        // 2. Populate Tax (消費税)
+        const tax = data.tax !== undefined ? data.tax : 0;
+        const taxDisplay = document.getElementById('modal-tax');
+        if (taxDisplay) {
+            taxDisplay.textContent = `¥${Math.round(tax).toLocaleString()}`;
+        }
+
+        // 3. Populate Grand Total (税込み合計) using modal-total
         const grandTotal = data.total_amount !== undefined ? data.total_amount : 0;
-        const totalDisplay = document.getElementById('computed-total');
+        const totalDisplay = document.getElementById('modal-total');
         if (totalDisplay) {
-            totalDisplay.value = Math.round(grandTotal);
+            totalDisplay.textContent = `¥${Math.round(grandTotal).toLocaleString()}`;
         }
 
         // 4. Update the hidden total input so saveExpense() picks up the correct total
@@ -1023,9 +1050,16 @@
             hiddenTotal.value = grandTotal;
         }
 
-        // 5. Trigger calculateTotal() immediately so the mixed 8%/10% tax total populates on open
+        // Also update hidden subtotal and tax if you have them:
+        const hiddenSub = document.getElementById('hidden_subtotal_amount');
+        if (hiddenSub) hiddenSub.value = subtotal;
+
+        const hiddenTax = document.getElementById('hidden_tax');
+        if (hiddenTax) hiddenTax.value = tax;
+
+        // 5. Trigger calculateTotal() immediately so item-level sums and mixed tax totals populate on open
         calculateTotal();
-    
+        
         console.log("🧾 Initial receipt loaded with verbatim total_amount:", grandTotal);
 
         const modal = document.getElementById('editCard');
@@ -1104,35 +1138,46 @@
             
             sum += price;
             
-            // Exact embedded tax calculation per item: Tax = Price * (rate / (1 + rate))
+            // Corrected tax calculation with multiplication operator
             const itemTax = price * (rate / (1 + rate));
             totalTax += itemTax;
         });
 
-        // Update the visual total display
-        const totalDisplay = document.getElementById('computed-total');
+        // 1. Update 本体価格 subtotal span display
+        const subtotalDisplay = document.getElementById('modal-subtotal');
+        if (subtotalDisplay) {
+            subtotalDisplay.textContent = `¥${Math.round(sum).toLocaleString()}`;
+        }
+
+        // 2. Update 消費税 tax span display
+        const taxDisplay = document.getElementById('modal-tax');
+        if (taxDisplay) {
+            taxDisplay.textContent = `¥${Math.round(totalTax).toLocaleString()}`;
+        }
+
+        // 3. Update 税込み合計 grand total span display
+        const totalDisplay = document.getElementById('modal-total');
         if (totalDisplay) {
-            totalDisplay.value = Math.round(sum);
+            const grandTotal = Math.round(sum) + Math.round(totalTax);
+            totalDisplay.textContent = `¥${grandTotal.toLocaleString()}`;
         }
 
-        // Update hidden total for backend submission
+        // Update hidden inputs safely with null checks
+        const hiddenSub = document.getElementById('hidden_subtotal_amount');
+        if (hiddenSub) hiddenSub.value = Math.round(sum);
+
+        const hiddenTax = document.getElementById('hidden_tax');
+        if (hiddenTax) hiddenTax.value = Math.round(totalTax);
+
         const hiddenTotal = document.getElementById('hidden_total_amount');
-        if (hiddenTotal) {
-            hiddenTotal.value = sum;
-        }
-
-        // Update the visual tax input with the precise combined sum of 8% and 10% items
-        const taxInput = document.getElementById('tax');
-        if (taxInput) {
-            taxInput.value = Math.round(totalTax);
-        }
+        if (hiddenTotal) hiddenTotal.value = Math.round(sum) + Math.round(totalTax);
 
         return sum;
     }
 
-    // Ensure live calculation updates when typing in item amounts or discounts
+    // Ensure live calculation updates when typing in item amounts or changing tax rates
     document.addEventListener('input', function(e) {
-        if (e.target && e.target.matches('input[name="item_amount[]"]')) {
+        if (e.target && (e.target.matches('input[name="item_amount[]"]') || e.target.matches('select[name="item_tax_rate[]"]'))) {
             calculateTotal();
         }
     });
@@ -1402,7 +1447,6 @@
                 console.log("📂 Fresh allExpenses loaded from API:", allExpenses);
                 if (allExpenses.length > 0) {
                     console.table(allExpenses[0]);
-                    console.log("Keys available on first item:", Object.keys(allExpenses[0]));
                 }
                 
                 // 3. Render data AFTER the month filter value is already correctly set
@@ -1420,7 +1464,6 @@
         if (monthFilter) {
             monthFilter.addEventListener('change', () => {
                 localStorage.setItem('hisa_last_month', monthFilter.value);
-                console.log("月フィルター変更:", monthFilter.value);
                 filterDataByMonth();
             });
         }
@@ -1428,28 +1471,20 @@
         // 5. Attach search input events
         const searchInput = document.getElementById('searchInput');
         if (searchInput) {
-            searchInput.addEventListener('input', () => {
-                filterDataByMonth();
-            });
-            searchInput.addEventListener('keyup', () => {
-                filterDataByMonth();
-            });
+            searchInput.addEventListener('input', () => filterDataByMonth());
+            searchInput.addEventListener('keyup', () => filterDataByMonth());
         }
 
-        const computedTotalInput = document.getElementById('computed-total');
-        if (computedTotalInput) {
-            computedTotalInput.addEventListener('input', function(event) {
-                const manualTotal = parseFloat(event.target.value) || 0;
-                
-                // Keep your active receipt state in sync if you store parsed data globally
-                if (typeof currentReceiptData !== 'undefined' && currentReceiptData) {
-                    currentReceiptData.manual_total_override = manualTotal;
-                }
-                
-                console.log('Manual total correction updated:', manualTotal);
-            });
-        }
-    });
+        // 6. ADDED: Listen for changes across item rows to recalculate the 3 slots live
+        document.addEventListener('input', function(e) {
+            if (e.target && (e.target.matches('input[name="item_amount[]"]') || e.target.matches('select[name="item_tax_rate[]"]'))) {
+                calculateTotal();
+            }
+        });
+
+        console.log('Receipt modal, 3-slot live calculation, and month filters fully initialized.');
+    }); 
+        
     </script>
     <script>
         if ('serviceWorker' in navigator) {
