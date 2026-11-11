@@ -20,20 +20,17 @@ from google.api_core.exceptions import InternalServerError, ServiceUnavailable
 # --- 🚀 初期設定 ---
 app = Flask(__name__)
 
-# Flask セキュリティ設定（必要に応じて）
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'super-secret-key-59310')
-APP_PASSWORD = os.environ.get('APP_PASSWORD', 'suziegogo')
+# Securely load from environment variables (no hardcoded secrets)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY')
+if not app.secret_key:
+    raise ValueError("CRITICAL: FLASK_SECRET_KEY is missing.")
 
-# Firestoreクライアントの初期化
-db = firestore.Client()
+APP_PASSWORD = os.environ.get('APP_PASSWORD')
+if not APP_PASSWORD:
+    raise ValueError("CRITICAL: APP_PASSWORD is missing.")
 
-# 🌟 Vertex AI経由のGenaiクライアント初期化（asia-northeast1）
+# Google Cloud Project ID (Safe to keep default fallback if needed, but cleaner via env)
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT', 'commanding-fact-481507-n7')
-client = genai.Client(
-    vertexai=True, 
-    project=PROJECT_ID,
-    location='asia-northeast1' 
-)
 
 # --- 🔒 認証 & PWAルート制御 (Before Request) ---
 @app.before_request
