@@ -206,7 +206,7 @@ def analyze_receipt_with_retry(image_bytes, mime_type, retries=3, delay=2):
     for attempt in range(retries):
         try:
             response = client.models.generate_content(
-                model='gemini-2.5-flash', # or gemini-3.5-flash depending on your model tier
+                model='gemini-3.5-flash', # or gemini-3.5-flash depending on your model tier
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=RECEIPT_SYSTEM_PROMPT, 
