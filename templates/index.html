@@ -261,48 +261,45 @@
             <h2 class="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3">支出明細一覧（税抜き合計額と税金）</h2>
             
             {% if expenses %}
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <!-- 列幅の定義 -->
+                <div class="w-full">
+                    <table class="table-fixed w-full divide-y divide-gray-200">
+                        <!-- 列幅の配分（合計100%を維持し、スマホで収まるように調整） -->
                         <colgroup>
-                            <col style="width: 45%;"> <!-- 1st Column: 日付・店舗名 -->
-                            <col style="width: 35%;"> <!-- 2nd Column: 金額（税抜）・消費税 -->
-                            <col style="width: 20%;"> <!-- 3rd Column: AI詳細ボタン ＆ 削除ボタン -->
+                            <col style="width: 38%;"> <!-- 1st Column: 日付・店舗名 -->
+                            <col style="width: 31%;"> <!-- 2nd Column: 金額（税抜）・消費税 -->
+                            <col style="width: 31%;"> <!-- 3rd Column: 詳細・削除ボタン -->
                         </colgroup>
 
-                        <!-- テーブル本体（JSが動的に行を書き換える場所） -->
+                        <!-- テーブル本体 -->
                         <tbody id="expenseList" class="divide-y divide-gray-100 bg-white">
                             {% for item in expenses %}
-                            <!-- 🌟 Add the unique row ID and transition classes right here on the <tr> -->
                             <tr id="row-{{ item.get('id', '') }}" class="hover:bg-gray-50/80 transition-all duration-300">
                                 <!-- 日付と店舗名 -->
-                                <td class="py-3 px-3">
-                                    <div class="text-[11px] text-gray-500 font-medium">{{ item.get('日付', '') }}</div>
-                                    <div class="text-xs font-bold text-gray-900 mt-0.5 max-w-[160px] sm:max-w-xs truncate" title="{{ item.get('店舗名', '不明') }}">
-                                        {{ item.get('店舗名', '不明') }}
+                                <td class="py-2.5 px-1.5 align-middle">
+                                    <div class="text-[10px] text-gray-500 font-medium">{{ item.get('date', '') }}</div>
+                                    <div class="text-xs font-bold text-gray-900 mt-0.5 truncate" title="{{ item.get('store_name', '不明') }}">
+                                        {{ item.get('store_name', '不明') }}
                                     </div>
                                 </td>                                        
                                 
-                                <!-- 金額と税 (Equal visual weight) -->
-                                <td class="py-3 px-3 text-right whitespace-nowrap font-mono">
-                                    <div class="text-xs font-extrabold text-gray-900">¥{{ "{:,}".format(item.get('金額 (¥)', 0) | int) }}</div>
-                                    <div class="text-xs font-bold text-indigo-600 mt-0.5">税: ¥{{ "{:,}".format(item.get('消費税 (¥)', 0) | int) }}</div>
-                                </td>
+                                <!-- 金額と税 -->
+                                <td class="py-2.5 px-1.5 text-right font-mono align-middle">
+                                    <div class="text-xs font-extrabold text-gray-900">¥{{ "{:,}".format(item.get('subtotal_amount', item.get('total_amount', 0)) | int) }}</div>
+                                    <div class="text-[9px] font-bold text-indigo-600 mt-0.5">税: ¥{{ "{:,}".format(item.get('tax', 0) | int) }}</div>
+                                </td>                               
 
-                                <!-- Expandable Sub-Table Container (Hidden by default) -->
-                                <div id="details-${receipt.id}" class="hidden mt-3 pt-3 border-t border-gray-100 bg-gray-50/50 rounded-xl p-3 text-xs">
-                                    <div class="font-bold text-gray-700 mb-2">AI解析・商品内訳</div>
-                                    <div class="space-y-1">
-                                        <!-- Dynamically injected item rows go here -->
+                                <!-- 詳細・削除ボタン（スマホで折り返さないようパディングを極小化） -->
+                                <td class="py-2.5 px-1 text-center align-middle whitespace-nowrap">
+                                    <div class="inline-flex space-x-0.5">
+                                        <button type="button" onclick="toggleReceiptDetails('{{ item.get('id', '') }}')" 
+                                            class="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-bold px-1.5 py-1 rounded transition-colors border border-indigo-200">
+                                            詳細
+                                        </button>
+                                        <button type="button" onclick="deleteExpense('{{ item.get('id', '') }}')" 
+                                            class="bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold px-1.5 py-1 rounded transition-colors border border-red-200">
+                                            削除
+                                        </button>
                                     </div>
-                                </div>
-                                
-                                <!-- 削除ボタン -->
-                                <td class="py-3 px-3 text-center whitespace-nowrap">
-                                    <button type="button" onclick="deleteExpense('{{ item.get('id', '') }}')" 
-                                        class="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors border border-red-200">
-                                        削除
-                                    </button>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -311,12 +308,12 @@
                         <!-- フッター（合計行） -->
                         <tfoot>
                             <tr class="bg-gray-50/50 font-semibold border-t border-gray-200">
-                                <td class="py-3 px-3 text-xs text-gray-700 font-bold">
-                                    合計 (<span id="filteredCount">0</span>件)
+                                <td class="py-2.5 px-1.5 text-[11px] text-gray-700 font-bold align-middle">
+                                    合計 (<span id="filteredCount">{{ expenses|length }}</span>件)
                                 </td>
-                                <td class="py-3 px-3 text-right font-mono">
-                                    <div id="totalAmountCell" class="text-xs sm:text-sm font-extrabold text-gray-900">¥0</div>
-                                    <div id="totalTaxCell" class="text-xs sm:text-sm font-bold text-indigo-600 mt-0.5">税: ¥0</div>
+                                <td class="py-2.5 px-1.5 text-right font-mono align-middle">
+                                    <div id="totalAmountCell" class="text-xs font-extrabold text-gray-900">¥0</div>
+                                    <div id="totalTaxCell" class="text-[9px] font-bold text-indigo-600 mt-0.5">税: ¥0</div>
                                 </td>
                                 <td></td>
                             </tr>
@@ -574,20 +571,23 @@
                     totalAmount += itemAmount;
                     totalTax += itemTax;
 
-                    // Build itemized sub-items list for the expandable AI details row
+                    // Build itemized sub-items list using CSS Grid to guarantee zero side-scrolling
                     let subItemsHTML = '';
-                    if (itemsList.length > 0) {
-                        subItemsHTML = itemsList.map(sub => `
-                            <div class="flex justify-between items-center text-gray-700 py-1 px-2.5 bg-white rounded-lg border border-gray-100 text-xs mb-1">
-                                <div>
-                                    <span class="font-medium text-gray-900">${sub.name || sub['商品名'] || '商品'}</span>
-                                    <span class="text-[10px] text-gray-400 ml-2">(${sub.category || sub['カテゴリ'] || '一般'})</span>
-                                </div>
-                                <span class="font-mono font-bold text-gray-900">¥${Number(String(sub.amount || sub['金額'] || 0).replace(/[^0-9.-]+/g, "")).toLocaleString()}</span>
-                            </div>
-                        `).join('');
+                    if (itemsList && itemsList.length > 0) {
+                        subItemsHTML = itemsList.map(function(sub) {
+                            var subName = sub.name || sub['商品名'] || '商品';
+                            var subCat = sub.category || sub['カテゴリ'] || '一般';
+                            var subAmt = Number(String(sub.amount || sub['金額'] || 0).replace(/[^0-9.-]+/g, ""));
+                            return '<div class="grid grid-cols-[1fr_auto] gap-2 items-start py-1.5 px-2 bg-white rounded-lg border border-gray-100 text-xs mb-1 w-full">' +
+                                '    <div class="min-w-0 pr-1 overflow-hidden">' +
+                                '        <span class="font-medium text-gray-900 block break-words leading-tight">' + subName + '</span>' +
+                                '        <span class="text-[9px] text-gray-400">(' + subCat + ')</span>' +
+                                '    </div>' +
+                                '    <span class="font-mono font-bold text-gray-900 whitespace-nowrap text-right shrink-0">¥' + subAmt.toLocaleString() + '</span>' +
+                                '</div>';
+                        }).join('');
                     } else {
-                        subItemsHTML = `<div class="text-gray-400 text-xs italic py-1">商品内訳データがありません</div>`;
+                        subItemsHTML = '<div class="text-gray-400 text-xs italic py-1">商品内訳データがありません</div>';
                     }
 
                     html += `
@@ -598,29 +598,28 @@
                                 ${store}
                             </div>
                         </td>
-                        <td class="py-3 px-3 text-right whitespace-nowrap font-mono">
+                        <td class="py-3 px-2 w-[31%] text-right font-mono align-middle">
                             <div class="text-xs font-extrabold text-gray-900">¥${itemAmount.toLocaleString()}</div>
-                            <div class="text-xs font-bold text-indigo-600 mt-0.5">消費税: ¥${Math.round(itemTax).toLocaleString()}</div>
+                            <div class="text-[10px] font-bold text-indigo-600 mt-0.5">税: ¥${Math.round(itemTax).toLocaleString()}</div>
                         </td>
-                        <td class="py-3 px-3 text-center whitespace-nowrap flex items-center justify-center space-x-2">
+                        <td class="py-3 px-2 w-[31%] text-center align-middle space-y-1 sm:space-y-0 sm:space-x-1 whitespace-nowrap">
                             <button onclick="toggleReceiptDetails('${id}')" 
-                                class="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors border border-indigo-200">
+                                class="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 hover:text-indigo-700 text-[11px] font-bold px-2 py-1 rounded-lg transition-colors border border-indigo-200 inline-block">
                                 AI詳細
                             </button>
                             <button onclick="deleteExpense('${id}')" 
-                                class="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors border border-red-200">
+                                class="bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 text-[11px] font-bold px-2 py-1 rounded-lg transition-colors border border-red-200 inline-block">
                                 削除
                             </button>
                         </td>
                     </tr>
-                    <!-- Expandable AI Details Sub-Table Row -->
                     <tr id="details-${id}" class="hidden bg-gray-50/60 border-b border-gray-100">
-                        <td colspan="3" class="px-4 py-3">
+                        <td colspan="3" class="px-4 py-3 overflow-hidden max-w-full">
                             <div class="text-xs font-bold text-gray-700 mb-2 flex items-center justify-between">
                                 <span>AI解析・商品内訳</span>
                                 <span class="text-[10px] text-gray-400 font-normal">Receipt Item Breakdown</span>
                             </div>
-                            <div class="space-y-1">
+                            <div class="space-y-1 w-full min-w-0">
                                 ${subItemsHTML}
                             </div>
                         </td>
