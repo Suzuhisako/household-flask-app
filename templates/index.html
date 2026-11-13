@@ -153,15 +153,15 @@
 
                 <div class="grid grid-cols-3 gap-2 text-center p-3 bg-gray-50 rounded-lg">
                     <div>
-                        <span class="text-xs text-gray-500 block">本体価格 (Subtotal)</span>
+                        <span class="text-xs text-gray-500 block">本体価格</span>
                         <span class="font-bold text-gray-800" id="modal-subtotal">¥0</span>
                     </div>
                     <div>
-                        <span class="text-xs text-gray-500 block">消費税 (Tax)</span>
+                        <span class="text-xs text-gray-500 block">消費税</span>
                         <span class="font-bold text-gray-800" id="modal-tax">¥0</span>
                     </div>
                     <div>
-                        <span class="text-xs text-gray-500 block">税込み合計 (Total)</span>
+                        <span class="text-xs text-gray-500 block">税込み合計</span>
                         <span class="font-bold text-indigo-600" id="modal-total">¥0</span>
                     </div>            
                 </div>
@@ -1075,6 +1075,10 @@
             "食費", "日用品", "外食", "交通費", "娯楽", "固定費", "衣服・美容", "医療費", "その他"
         ];
 
+        // Detect if this row is a discount (negative amount or contains 割引 / 値引き)
+        const isDiscount = amount < 0 || name.includes('割引') || name.includes('値引き');
+        const parsedTaxRate = parseFloat(taxRate) || 0.08;
+
         const row = document.createElement('div');
         row.className = "item-row flex items-center gap-1.5 bg-gray-900 p-2 rounded-xl border border-gray-700 transition-all mb-2";
         
@@ -1088,11 +1092,18 @@
                 `).join('')}
             </select>
             
-            <!-- Compact Tax Rate Selector (8% for food, 10% for standard) -->
-            <select name="item_tax_rate[]" onchange="calculateTotal()" class="bg-gray-800 border border-gray-600 rounded-lg px-1.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-[#912301]">
-                <option value="0.08" ${taxRate === 0.08 ? 'selected' : ''}>8%</option>
-                <option value="0.10" ${taxRate === 0.10 ? 'selected' : ''}>10%</option>
-            </select>
+            <!-- Tax Rate Selector: Locked explicit width for perfect column alignment -->
+            ${isDiscount ? `
+                <input type="hidden" name="item_tax_rate[]" value="">
+                <select disabled class="w-[58px] shrink-0 bg-gray-800/40 border border-gray-700/50 rounded-lg px-1.5 py-1.5 text-[11px] text-gray-500 text-center cursor-not-allowed opacity-60">
+                    <option>&mdash;</option>
+                </select>
+            ` : `
+                <select name="item_tax_rate[]" onchange="calculateTotal()" class="w-[58px] shrink-0 bg-gray-800 border border-gray-600 rounded-lg px-1.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-[#912301]">
+                    <option value="0.08" ${parsedTaxRate === 0.08 ? 'selected' : ''}>8%</option>
+                    <option value="0.10" ${parsedTaxRate === 0.10 ? 'selected' : ''}>10%</option>
+                </select>
+            `}
             
             <div class="relative w-20 sm:w-24 shrink-0">
                 <span class="absolute left-2 top-1.5 text-xs text-gray-400">¥</span>
