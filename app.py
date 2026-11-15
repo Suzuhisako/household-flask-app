@@ -186,48 +186,48 @@ def index():
         return render_template('index.html', expenses=[], total_amount=0, total_tax=0, error=str(e))
 
 def validate_and_fix_receipt_totals(data):
-    """
-    Takes a receipt dictionary, strictly recalculates subtotal, tax, and total 
-    using Japanese bracket-level math flooring, completely overriding LLM OCR drift.
-    """
     items = data.get('items', [])
+    is_tax_included = data.get('is_tax_included', True) # Default to true for supermarkets, or detect from items
+    
+    # Sum of items is always the base amount printed on the receipt
+    item_sum = sum(float(item.get('amount', 0)) for item in items)
     
     subtotal_8 = 0
     subtotal_10 = 0
+    extracted_tax = 0
     
     for item in items:
         amount = float(item.get('amount', 0))
-        tax_rate = item.get('taxRate') if item.get('taxRate') is not None else item.get('tax_rate', 0.08)
+        tax_rate = float(item.get('taxRate') if item.get('taxRate') is not None else item.get('tax_rate', 0.08))
         
-        # Skip discounts or 0-rate items from taxable subtotal calculation
-        if tax_rate is None or tax_rate == 0 or tax_rate == "0":
-            continue
-            
-        if float(tax_rate) >= 0.10:
-            subtotal_10 += amount
-        else:
+        if tax_rate == 0.08:
             subtotal_8 += amount
-            
-    # 1. Calculate exact total subtotal (including negative discounts)
-    subtotal_amount = sum(float(item.get('amount', 0)) for item in items)
-    
-    # 2. Calculate tax per bracket using standard Japanese flooring (Math.floor)
-    tax_8_base = subtotal_8 if subtotal_8 > 0 else max(0, subtotal_amount)
-    tax_8 = math.floor(tax_8_base * 0.08)
-    tax_10 = math.floor(subtotal_10 * 0.10)
-    calculated_tax = int(tax_8 + tax_10)
-    
-    # 3. Calculate exact total
-    calculated_total = int(subtotal_amount + calculated_tax)
-    
-    # 4. Force override dictionary values
-    data['subtotal_amount'] = int(subtotal_amount)
-    data['tax'] = calculated_tax
-    data['total_amount'] = calculated_total
-    
-    print(f"🔧 Python Bracket Math Reconciliation -> Subtotal: ¥{subtotal_amount} + Tax: ¥{calculated_tax} = Total: ¥{calculated_total}")
-    return data
+        elif tax_rate >= 0.10:
+            subtotal_10 += amount
 
+    if is_tax_included:
+        # For Uchizei: Tax is extracted FROM the item prices (Price * rate / (1 + rate))
+        tax_8 = math.floor(subtotal_8 * 0.08 / 1.08)
+        tax_10 = math.floor(subtotal_10 * 0.10 / 1.10)
+        extracted_tax = tax_8 + tax_10
+        
+        subtotal_amount = item_sum - extracted_tax # Net base price excluding internal tax
+        total_amount = item_sum # Grand total equals the sum of printed item prices
+    else:
+        # For Sotozei: Tax is calculated on top and added
+        tax_8 = math.floor(subtotal_8 * 0.08)
+        tax_10 = math.floor(subtotal_10 * 0.10)
+        extracted_tax = tax_8 + tax_10
+        
+        subtotal_amount = item_sum
+        total_amount = subtotal_amount + extracted_tax
+
+    data['subtotal_amount'] = int(subtotal_amount)
+    data['tax'] = int(extracted_tax)
+    data['total_amount'] = int(total_amount)
+    
+    print(f"🔧 Python {'Uchizei' if is_tax_included else 'Sotozei'} Reconciliation -> Total: ¥{total_amount} (Tax: ¥{extracted_tax})")
+    return data
 
 def analyze_receipt_with_retry(image_bytes, mime_type="image/jpeg", max_retries=3):
     if not mime_type or mime_type not in ["image/jpeg", "image/png", "image/webp", "image/heic"]:
@@ -251,6 +251,8 @@ def analyze_receipt_with_retry(image_bytes, mime_type="image/jpeg", max_retries=
         "2. TAX RATES: Assign taxRate: 0.08 for food/beverages (食料品, 惣菜) and taxRate: 0.10 for standard items (clothing, beauty, alcohol, sundries). "
         "For discount lines, set taxRate to null or 0.0 and amount to negative (e.g., -100). "
         "3. EXTRACTION: Transcribe item names and amounts accurately from the receipt image."
+        "4. TAX MODE (内税 vs 外税): Determine if the receipt is primarily tax-included (内税 / uchizei, common in supermarkets where item prices include tax and sum directly to the total) "
+        "or tax-excluded (外税 / sotozei, where tax is added on top of the subtotal). Set 'is_tax_included' to true or false for the receipt."
     )
 
     for attempt in range(max_retries):
