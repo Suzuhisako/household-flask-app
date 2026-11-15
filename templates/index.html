@@ -1004,22 +1004,21 @@
             container.innerHTML = '';
             
             const items = data.items || [];
-            if (items.length > 0) {
-                items.forEach(item => {
-                    // AUTOMATIC TAX RATE ASSIGNMENT:
-                    // If category is "食費" (Food), default to 8% (0.08). Otherwise, default to standard 10% (0.10).
-                    // (You can also honor item.tax_rate if your backend AI provides it directly)
-                    let taxRate = 0.10;
-                    if (item.category === '食費' || item.tax_rate === 0.08) {
-                                taxRate = 0.08;
-                    }
-                            
-                    container.appendChild(createItemRow(item.name, item.category, item.amount, taxRate));
-                });
-            } else {
-                // Fallback: If no items, add one blank row defaulting to "食費" at 8%
-                container.appendChild(createItemRow('', '食費', 0, 0.08));
-            }
+            items.forEach(item => {
+                // 🔑 ROBUST 8% TAX DETECTION:
+                let taxRate = 0.10; // Default to standard 10%
+                
+                // Check if backend explicitly provided 8% or if category matches any food variation
+                if (
+                    item.tax_rate === 0.08 || 
+                    item.tax_rate === '0.08' || 
+                    ['食費', '食品', '惣菜', '飲料', '食料品'].includes(item.category)
+                ) {
+                    taxRate = 0.08;
+                }
+                    
+                container.appendChild(createItemRow(item.name, item.category, item.amount, taxRate));
+            });
         }
            
         // 1. Populate Subtotal (本体価格)
@@ -1056,15 +1055,29 @@
         const hiddenTax = document.getElementById('hidden_tax');
         if (hiddenTax) hiddenTax.value = tax;
 
-        // 5. Trigger calculateTotal() immediately so item-level sums and mixed tax totals populate on open
-        calculateTotal();
-        
-        console.log("🧾 Initial receipt loaded with verbatim total_amount:", grandTotal);
+        // console.log("🧾 Initial receipt loaded with verbatim total_amount:", grandTotal);   
+       
+
+        // 5. ATTACH LISTENERS AFTER LOADING (Only triggers when user manually edits later)
+        attachInputListenersToRows();
 
         const modal = document.getElementById('editCard');
         if (modal) {
             modal.classList.remove('hidden');
         }
+    }
+
+    // Helper function to attach event listeners to the newly created rows
+    function attachInputListenersToRows() {
+        const container = document.getElementById('items-container');
+        if (!container) return;
+
+        container.querySelectorAll('input, select').forEach(element => {
+            element.addEventListener('input', () => {
+                // This ONLY runs when the user actively types or changes an item manually!
+                calculateTotal(); 
+            });
+        });
     }
     
     // ==========================================
@@ -1134,7 +1147,7 @@
         }
     }    
     
-    function calculateTotal() {
+    /*function calculateTotal() {
         let sum = 0;
         let totalTax = 0;
         
@@ -1183,6 +1196,63 @@
         if (hiddenTotal) hiddenTotal.value = Math.round(sum) + Math.round(totalTax);
 
         return sum;
+    }*/
+
+    function calculateTotal() {
+        let subtotal8 = 0;
+        let subtotal10 = 0;
+        
+        // 1. Group item amounts by tax rate bracket
+        document.querySelectorAll('.item-row').forEach(row => {
+            const priceInput = row.querySelector('input[name="item_amount[]"]');
+            const rateSelect = row.querySelector('select[name="item_tax_rate[]"]');
+            
+            const price = Number(priceInput?.value) || 0;
+            const rate = rateSelect ? Number(rateSelect.value) : 0.08;
+            
+            if (rate === 0.10) {
+                subtotal10 += price;
+            } else {
+                subtotal8 += price; // Defaults to 8% for food/general items
+            }
+        });
+
+        const totalSubtotal = subtotal8 + subtotal10;
+
+        // 2. Calculate tax per bracket once using Japanese flooring standards
+        const tax8 = Math.floor(subtotal8 * 0.08);
+        const tax10 = Math.floor(subtotal10 * 0.10);
+        const totalTax = tax8 + tax10;
+
+        const grandTotal = totalSubtotal + totalTax;
+
+        // 3. Update UI displays
+        const subtotalDisplay = document.getElementById('modal-subtotal');
+        if (subtotalDisplay) {
+            subtotalDisplay.textContent = `¥${Math.round(totalSubtotal).toLocaleString()}`;
+        }
+
+        const taxDisplay = document.getElementById('modal-tax');
+        if (taxDisplay) {
+            taxDisplay.textContent = `¥${Math.round(totalTax).toLocaleString()}`;
+        }
+
+        const totalDisplay = document.getElementById('modal-total');
+        if (totalDisplay) {
+            totalDisplay.textContent = `¥${grandTotal.toLocaleString()}`;
+        }
+
+        // 4. Update hidden inputs for backend submission
+        const hiddenSub = document.getElementById('hidden_subtotal_amount');
+        if (hiddenSub) hiddenSub.value = totalSubtotal;
+
+        const hiddenTax = document.getElementById('hidden_tax');
+        if (hiddenTax) hiddenTax.value = totalTax;
+
+        const hiddenTotal = document.getElementById('hidden_total_amount');
+        if (hiddenTotal) hiddenTotal.value = grandTotal;
+
+        return totalSubtotal;
     }
 
     // Ensure live calculation updates when typing in item amounts or changing tax rates
