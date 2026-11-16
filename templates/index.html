@@ -137,20 +137,6 @@
                     </button>
                 </div>
 
-                <!-- 消費税 & 合計金額エリア
-                <div class="grid grid-cols-2 gap-3 items-center bg-gray-900 p-3 rounded-xl border border-gray-700">
-                    <div>
-                        <label class="block text-[10px] text-gray-400 font-medium mb-1">税込み合計金額 (円)</label>
-                        <input type="number" id="computed-total" name="computed_total" value="0"
-                            class="w-full bg-gray-800 border border-gray-600 rounded-lg pl-6 pr-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#912301]">                        
-                    </div>
-                    <div>
-                        <label class="block text-[10px] text-gray-400 font-medium mb-1">内消費税 (円)</label>
-                        <input type="number" id="tax" name="tax" value="0"
-                            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#912301]">
-                    </div>                    
-                </div> -->
-
                 <div class="grid grid-cols-3 gap-2 text-center p-3 bg-gray-50 rounded-lg">
                     <div>
                         <span class="text-xs text-gray-500 block">本体価格</span>
@@ -1145,58 +1131,8 @@
             row.remove();
             calculateTotal();
         }
-    }    
+    }     
     
-    /*function calculateTotal() {
-        let sum = 0;
-        let totalTax = 0;
-        
-        // Loop through each item row
-        document.querySelectorAll('.item-row').forEach(row => {
-            const priceInput = row.querySelector('input[name="item_amount[]"]');
-            const rateSelect = row.querySelector('select[name="item_tax_rate[]"]');
-            
-            const price = Number(priceInput?.value) || 0;
-            const rate = rateSelect ? Number(rateSelect.value) : 0.08;
-            
-            sum += price;
-            
-            // Corrected tax calculation with multiplication operator
-            const itemTax = price * (rate / (1 + rate));
-            totalTax += itemTax;
-        });
-
-        // 1. Update 本体価格 subtotal span display
-        const subtotalDisplay = document.getElementById('modal-subtotal');
-        if (subtotalDisplay) {
-            subtotalDisplay.textContent = `¥${Math.round(sum).toLocaleString()}`;
-        }
-
-        // 2. Update 消費税 tax span display
-        const taxDisplay = document.getElementById('modal-tax');
-        if (taxDisplay) {
-            taxDisplay.textContent = `¥${Math.round(totalTax).toLocaleString()}`;
-        }
-
-        // 3. Update 税込み合計 grand total span display
-        const totalDisplay = document.getElementById('modal-total');
-        if (totalDisplay) {
-            const grandTotal = Math.round(sum) + Math.round(totalTax);
-            totalDisplay.textContent = `¥${grandTotal.toLocaleString()}`;
-        }
-
-        // Update hidden inputs safely with null checks
-        const hiddenSub = document.getElementById('hidden_subtotal_amount');
-        if (hiddenSub) hiddenSub.value = Math.round(sum);
-
-        const hiddenTax = document.getElementById('hidden_tax');
-        if (hiddenTax) hiddenTax.value = Math.round(totalTax);
-
-        const hiddenTotal = document.getElementById('hidden_total_amount');
-        if (hiddenTotal) hiddenTotal.value = Math.round(sum) + Math.round(totalTax);
-
-        return sum;
-    }*/
 
     function calculateTotal() {
         let subtotal8 = 0;
