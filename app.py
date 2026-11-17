@@ -181,38 +181,68 @@ def index():
         print(f"🔥 Index Error: {e}")
         return render_template('index.html', expenses=[], total_amount=0, total_tax=0, error=str(e))
 
+def parse_tax_rate(tax_rate):
+    """Safely parses tax rates whether they are floats, ints, or strings like '10%', '8%', '0%'."""
+    if tax_rate is None or tax_rate == "":
+        return 0.08
+    if isinstance(tax_rate, (int, float)):
+        if tax_rate >= 1: # e.g. 10 or 8
+            return tax_rate / 100.0
+        return float(tax_rate)
+    
+    # Clean string representation (e.g., "10%", "10％", "0.0")
+    s = str(tax_rate).strip().replace('%', '').replace('％', '')
+    try:
+        val = float(s)
+        if val >= 1: # e.g. "10" or "8"
+            return val / 100.0
+        return val
+    except (ValueError, TypeError):
+        return 0.08
+
 def validate_and_fix_receipt_totals(data):
     """
     Takes a receipt dictionary, strictly recalculates subtotal, tax, and total 
     using Japanese bracket-level math flooring, completely overriding LLM OCR drift.
     """
     items = data.get('items', [])
+    store_name = str(data.get('store_name', ''))
     
+    subtotal_0 = 0
     subtotal_8 = 0
     subtotal_10 = 0
     
     for item in items:
         amount = float(item.get('amount', 0))
-        tax_rate = item.get('taxRate') if item.get('taxRate') is not None else item.get('tax_rate', 0.08)
+        category = str(item.get('category', ''))
+        item_name = str(item.get('name', ''))
+        raw_tax = item.get('taxRate') if item.get('taxRate') is not None else item.get('tax_rate', 0.08)
         
-        # Skip discounts or 0-rate items from taxable subtotal calculation
-        if tax_rate is None or tax_rate == 0 or tax_rate == "0":
-            continue
-            
-        if float(tax_rate) >= 0.10:
-            subtotal_10 += amount
+        # 🔑 BULLETPROOF 0% CHECK: Catch medical keywords in category, store name, or item name
+        medical_keywords = ['医療', '薬', '病院', 'クリニック', '医院', '調剤', '診察', '処方']
+        is_medical = any(kw in category or kw in store_name or kw in item_name for kw in medical_keywords)
+        
+        if is_medical:
+            tax_rate_float = 0.0
         else:
-            subtotal_8 += amount
-            
-    # 1. Calculate exact total subtotal (including negative discounts)
+            tax_rate_float = parse_tax_rate(raw_tax)
+        
+        # Categorize amount by tax bracket
+        if tax_rate_float == 0 or tax_rate_float == 0.0:
+            subtotal_0 += amount    # 0% tax items -> ¥0 tax
+        elif tax_rate_float >= 0.10:
+            subtotal_10 += amount   # 10% standard tax
+        else:
+            subtotal_8 += amount    # 8% reduced tax
+                
+    # 1. Calculate exact total subtotal
     subtotal_amount = sum(float(item.get('amount', 0)) for item in items)
-    
-    # 2. Calculate tax per bracket using standard Japanese flooring (Math.floor)
-    tax_8_base = subtotal_8 if subtotal_8 > 0 else max(0, subtotal_amount)
-    tax_8 = math.floor(tax_8_base * 0.08)
+        
+    # 2. Calculate tax per bracket independently using standard Japanese flooring (Math.floor)
+    tax_8 = math.floor(subtotal_8 * 0.08)
     tax_10 = math.floor(subtotal_10 * 0.10)
     calculated_tax = int(tax_8 + tax_10)
-    
+        
     # 3. Calculate exact total
     calculated_total = int(subtotal_amount + calculated_tax)
     
@@ -247,6 +277,7 @@ def analyze_receipt_with_retry(image_bytes, mime_type="image/jpeg", max_retries=
         "2. TAX RATES: Assign taxRate: 0.08 for food/beverages (食料品, 惣菜) and taxRate: 0.10 for standard items (clothing, beauty, alcohol, sundries). "
         "For discount lines, set taxRate to null or 0.0 and amount to negative (e.g., -100). "
         "3. EXTRACTION: Transcribe item names and amounts accurately from the receipt image."
+        "4.医療費（病院・調剤薬局の処方箋）や非課税品目（レジ袋・切手・商品券など）は tax_rate を 0.0 に設定してください。"
     )
 
     for attempt in range(max_retries):
