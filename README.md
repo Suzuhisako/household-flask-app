@@ -1,36 +1,83 @@
-# 🧾 Expense Tracker PWA with AI Receipt Analysis
+# 🧾 AI家計簿 PWA（Smart Receipt & Tax Tracker）
 
-A modern, responsive Progressive Web App (PWA) built with Flask and Tailwind CSS, featuring automated receipt itemization and tax-excluded financial breakdowns powered by Google GenAI and Google Cloud Run.
-
----
-
-## ✨ Key Features
-
-- **Unified Search & Filtering:** Filter expenses simultaneously by month and search query (matching store names, product names, or categories).
-- **Precise Financial Terminology:** Clear distinction between **商品合計 (Tax-Excluded Item Total)** and **消費税 (Consumption Tax)** across summary cards, donut center overlays, and hover tooltips.
-- **Interactive Donut Chart:** Powered by Chart.js with a floating center total overlay.
-- **Inline AI Receipt Analysis:** Expandable accordion rows that show itemized receipt breakdowns instantly without modal interruptions.
-- **Cloud-Native Deployment:** Containerized and deployed seamlessly on **Google Cloud Run** backed by **Google Firestore**.
+**Geminiのレシート解析と日本の税法に準拠した端数処理ロジックを融合し、医療費（0%）や複数税率（8%・10%）を1円の狂いもなく自動計算・管理できるPWA家計簿アプリです。**
 
 ---
 
-## 🛠️ Tech Stack
+## 💡 背景と課題（Insight & Purpose）
 
-- **Backend:** Python, Flask
-- **AI Integration:** Google GenAI SDK / Vertex AI
-- **Frontend:** Tailwind CSS, Chart.js, Vanilla JavaScript (PWA-ready)
-- **Database & Hosting:** Google Cloud Firestore, Google Cloud Run, Artifact Registry
+日本の家計簿アプリにおける最大の課題は、消費税の複数税率（8%・10%）や医療費などの非課税（0%）品目が混在するレシートの計算精度です。
 
----
-
-## 🚀 Local Development
-
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/Suzuhisako/household-flask-app](https://github.com/YOUR_USERNAME/your-repo-name.git)
-   cd your-repo-name
+従来のOCRや汎用AIだけでは、品目ごとの読み取り誤差や端数処理（切り捨て）のズレが生じ、レシートの合計金額と1円〜数円合わないストレスがありました。手作業での修正を減らし、医療費控除の準備や日々の家計管理を**「撮影するだけ」で正確に完結させたい**という思いから開発しました。
 
 ---
 
-## 📄 License
-This project is open-source and available under the MIT License.  
+## ✨ 主な機能・特徴
+
+- **📸 レシート撮影・一括データ化**: スマホのカメラや画像アップロードから、店舗名・日付・品目・金額・税率を自動抽出。
+- **🏥 医療費（0%非課税）の自動判定**: 医療・調剤関連のキーワード検知により、非課税品目を自動で `0%` 税率へ分類。
+- **🧮 日本の税法準拠のブラケット端数計算**: 税率区分（0% / 8% / 10%）ごとの小計に対して切り捨て処理（`math.floor`）を実行し、1円単位の誤差を排除。
+- **📊 月別集計・カテゴリ別グラフ可視化**: 登録データをリアルタイムで集計し、月ごとの支出バランスを直感的に確認。
+- **🛡️ 重複登録ガード**: 同一店舗・同日・同金額のレシート誤登録を防止。
+- **📱 PWA（Progressive Web Apps）対応**: アプリストアからのインストール不要で、スマホのホーム画面からネイティブアプリのように利用可能。
+
+---
+
+## 🤖 AIの使い方・技術的な工夫（Creativity & How）
+
+本アプリの最大の工夫は、**「AIの柔軟な文脈理解」と「プログラムによる厳密な計算」を組み合わせたハイブリッド設計**です。
+
+1. **Gemini 1.5 Flash によるマルチモーダル構造化抽出**
+   - レシート画像から店舗情報・明細・税率区分をJSON形式で高精度に抽出します。
+2. **バックエンド（Python）による数値リコンシリエーション（補正処理）**
+   - LLM特有の計算ドリフト（端数誤差）を防ぐため、AIが返した合計・税額をそのまま信頼せず、Python側で再計算・上書き（Override）を行います。
+   - 税率文字列の正規化（`10%` → `0.10`）、医療費キーワードによる `0%` 強制適用、税率区分別の `math.floor` 計算により、実務レベルの計算精度を実現しています。
+
+```text
+[スマホ / ブラウザ (PWA)]
+       │ レシート画像アップロード
+       ▼
+[Flask バックエンド (Cloud Run)]
+       │
+       ├──▶ 1. Gemini 1.5 Flash API（画像解析・JSON構造化）
+       │
+       ├──▶ 2. Python ブラケット税計算エンジン（0%医療費判定 + math.floor端数補正）
+       │
+       └──▶ 3. Cloud Firestore（重複チェック・データ永続化）
+🛠️ 技術スタック
+レイヤー	使用技術
+フロントエンド	HTML5, Tailwind CSS, Vanilla JavaScript, Chart.js, PWA (Manifest / Service Worker)
+バックエンド	Python 3.11, Flask, Gunicorn
+AI / LLM	Google Gemini API (gemini-1.5-flash)
+データベース	Google Cloud Firestore
+インフラ / デプロイ	Google Cloud Run, Docker
+🚀 ローカル環境でのセットアップ手順
+1. リポジトリのクローン
+Bash
+git clone [https://github.com/](https://github.com/)<your-username>/<your-repo-name>.git
+cd <your-repo-name>
+2. 仮想環境の作成と依存パッケージのインストール
+Bash
+python -m venv .venv
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+3. 環境変数の設定
+.env ファイルを作成するか、環境変数に Gemini API キーおよび Google Cloud 認証情報を設定します。
+Bash
+export GEMINI_API_KEY="your-gemini-api-key"
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account-key.json"
+4. アプリケーションの起動
+Bash
+python app.py
+起動後、ブラウザで http://127.0.0.1:5000 にアクセスします。
+🌱 生まれた変化と今後の展望（Impact & Scalability）
+•	生まれた変化: レシートの数値確認や電卓での検算、手入力の手間がなくなり、スマホでレシートを撮るだけで正確な月別集計とグラフ化が完結するようになりました。
+•	今後の展望:
+o	税込み（内税）レシートへの完全対応: 現在は外税（税抜表示）レシートの計算精度に特化していますが、内税レシートの逆算ロジックを統合予定。
+o	確定申告・医療費控除用エクスポート: 年間の医療費明細をワンクリックでCSV / PDF出力できる機能の追加。
+o	家族・チーム間での家計共有: マルチユーザー認証を導入し、家庭内や個人事業主の経費精算ツールへの拡張。
+•	レシートの数値確認や電卓での検算、手入力の手間がなくなり、レシートを撮るだけで正確な月別集計とグラフ化が完結するようになりました。また、PWA（Progressive Web Apps）として構築したため、インストール不要でスマホからアプリ感覚で快適に利用できます。現在は外税レシートの精密計算に特化していますが、次のアップデートとして「入り口で内税・外税を自動判定して専用計算レーンへ振り分け、最終的に同一データ形式へ統合するデュアルルーティング設計」の実装に着手しています。今後は確定申告・医療費控除用のCSV/PDF出力機能も加え、個人事業主や家族間での家計共有ツールへと発展させていきます。
