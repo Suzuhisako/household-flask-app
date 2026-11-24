@@ -996,6 +996,14 @@
                 
                 // Check if backend explicitly provided 8% or if category matches any food variation
                 if (
+                    item.tax_rate === 0 ||
+                    item.tax_rate === 0.0 ||
+                    item.tax_rate === '0' ||
+                    item.tax_rate === '0.00' ||
+                    item.category === '医療費'
+                ) {
+                    taxRate = 0;
+                } else if (
                     item.tax_rate === 0.08 || 
                     item.tax_rate === '0.08' || 
                     ['食費', '食品', '惣菜', '飲料', '食料品'].includes(item.category)
@@ -1076,7 +1084,9 @@
 
         // Detect if this row is a discount (negative amount or contains 割引 / 値引き)
         const isDiscount = amount < 0 || name.includes('割引') || name.includes('値引き');
-        const parsedTaxRate = parseFloat(taxRate) || 0.08;
+        const parsedTaxRate = (taxRate !== undefined && taxRate !== null && taxRate !== '') 
+            ? parseFloat(taxRate) 
+            : 0.08;
 
         const row = document.createElement('div');
         row.className = "item-row flex items-center gap-1.5 bg-gray-900 p-2 rounded-xl border border-gray-700 transition-all mb-2";
@@ -1099,6 +1109,7 @@
                 </select>
             ` : `
                 <select name="item_tax_rate[]" onchange="calculateTotal()" class="w-[58px] shrink-0 bg-gray-800 border border-gray-600 rounded-lg px-1.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-[#912301]">
+                    <option value="0" ${parsedTaxRate === 0 ? 'selected' : ''}>0%</option>
                     <option value="0.08" ${parsedTaxRate === 0.08 ? 'selected' : ''}>8%</option>
                     <option value="0.10" ${parsedTaxRate === 0.10 ? 'selected' : ''}>10%</option>
                 </select>
@@ -1131,10 +1142,10 @@
             row.remove();
             calculateTotal();
         }
-    }     
-    
+    }      
 
     function calculateTotal() {
+        let subtotal0 = 0;
         let subtotal8 = 0;
         let subtotal10 = 0;
         
@@ -1146,14 +1157,16 @@
             const price = Number(priceInput?.value) || 0;
             const rate = rateSelect ? Number(rateSelect.value) : 0.08;
             
-            if (rate === 0.10) {
+            if (rate === 0) {
+                subtotal0 += price;
+            } else if (rate === 0.10) {
                 subtotal10 += price;
             } else {
-                subtotal8 += price; // Defaults to 8% for food/general items
+                subtotal8 += price;
             }
         });
 
-        const totalSubtotal = subtotal8 + subtotal10;
+        const totalSubtotal = subtotal0 + subtotal8 + subtotal10;
 
         // 2. Calculate tax per bracket once using Japanese flooring standards
         const tax8 = Math.floor(subtotal8 * 0.08);
