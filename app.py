@@ -26,8 +26,6 @@ APP_PASSWORD = os.environ.get('APP_PASSWORD')
 if not APP_PASSWORD:
     raise ValueError("CRITICAL: APP_PASSWORD is missing.")
 
-
-
 # Firestoreクライアントの初期化
 db = firestore.Client()
 
@@ -52,7 +50,6 @@ def check_authentication():
     # ログインセッションがない場合は /login へリダイレクト
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-
 
 # --- 🔑 ログイン関連ルート ---
 @app.route('/login', methods=['GET', 'POST'])
@@ -95,7 +92,6 @@ def parse_yen_amount(v) -> int:
     val = int(digits)
     return -val if is_negative else val
 
-
 # --- 📋 カテゴリの選択肢を明確にした Pydantic スキーマ ---
 class ReceiptItem(BaseModel):
     name: str
@@ -126,7 +122,6 @@ def standardize_date(date_str):
         return f"{year}-{month}-{day}"
         
     return datetime.now().strftime('%Y-%m-%d')
-
 
 # --- 🏠 メイン画面（サマリー表示） ---
 @app.route('/')
@@ -253,7 +248,6 @@ def validate_and_fix_receipt_totals(data):
     
     print(f"🔧 Python Bracket Math Reconciliation -> Subtotal: ¥{subtotal_amount} + Tax: ¥{calculated_tax} = Total: ¥{calculated_total}")
     return data
-
 
 def analyze_receipt_with_retry(image_bytes, mime_type="image/jpeg", max_retries=3):
     if not mime_type or mime_type not in ["image/jpeg", "image/png", "image/webp", "image/heic"]:
@@ -622,7 +616,6 @@ def export_csv():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
 # --- 📱 PWA用ファイルの明示的ルーティング ---
 @app.route('/manifest.json')
 def serve_manifest():
@@ -631,7 +624,6 @@ def serve_manifest():
 @app.route('/sw.js')
 def serve_sw():
     return app.send_static_file('sw.js')
-
 
 # --- 🚀 サーバー起動 (Cloud RunのPORT環境変数に対応) ---
 if __name__ == '__main__':
